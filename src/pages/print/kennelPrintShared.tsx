@@ -235,7 +235,7 @@ export function KennelCardBlock({
     >
       <header className="mb-3 grid grid-cols-[1fr_auto_auto] items-end gap-3 border-b border-black pb-2">
         <div>
-          <p className="print-label text-sm font-semibold tracking-wide">MSH</p>
+          <p className="print-label text-sm font-semibold tracking-wide">Little Gems</p>
           <p className="text-[11px]">Kennel Card</p>
         </div>
         <div className="print-label text-center text-2xl font-bold">{roomLabel}</div>

@@ -675,7 +675,7 @@ async function printKennelCard(booking: BookingWithDetails) {
   await printKennelCards([booking], `Kennel Card ${bookingRef}`);
 }
 
-const BOARDING_OPERATIONS_PRINT_TIME = "12:00 PM (My Second Home DIP-2)";
+const BOARDING_OPERATIONS_PRINT_TIME = "12:00 PM (Little Gems by My Second Home DIP-2)";
 
 async function hydrateBookingsForComingGoingPrint(
   bookings: BookingWithDetails[],

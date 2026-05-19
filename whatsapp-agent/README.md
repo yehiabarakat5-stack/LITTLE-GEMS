@@ -2,7 +2,7 @@
 
 Multi-tenant WhatsApp agent runtime. Each business runs its own Railway service
 configured by a row in `public.tenants` plus its own active prompt and tool
-allow-list. The first tenant in this repo is `msh` (MySecondHome).
+allow-list. The first tenant in this repo is `msh` (Little Gems by My Second Home).
 
 ## Setup
 

@@ -45,8 +45,8 @@ const AppSidebar = () => {
       {/* Logo */}
       <div className="flex h-16 items-center gap-2.5 px-5 border-b border-sidebar-border">
         <PawPrint className="h-6 w-6 text-sidebar-primary" />
-        <span className="text-base font-bold tracking-tight text-sidebar-accent-foreground">
-          MySecondHome
+        <span className="text-sm font-bold leading-tight tracking-tight text-sidebar-accent-foreground">
+          Little Gems by My Second Home
         </span>
       </div>
 

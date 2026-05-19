@@ -40,7 +40,7 @@ const DashboardSidebar = () => {
           <PawPrint className="h-6 w-6 shrink-0 text-sidebar-primary" />
           {!collapsed && (
             <span className="text-lg font-semibold text-sidebar-accent-foreground tracking-tight whitespace-nowrap">
-              PetCare Admin
+              Little Gems by My Second Home
             </span>
           )}
         </div>

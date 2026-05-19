@@ -1,6 +1,6 @@
 # agent-chat edge function
 
-Proxies Claude API calls from the MSH admin UI.
+Proxies Claude API calls from the Little Gems staff admin UI.
 Requires an authenticated Supabase session.
 
 ## Setup (run once)

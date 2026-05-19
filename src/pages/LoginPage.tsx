@@ -41,11 +41,13 @@ const LoginPage = () => {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-sm space-y-8">
+      <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center gap-2">
+          <div className="inline-flex flex-col items-center justify-center gap-2">
             <PawPrint className="h-8 w-8 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">MySecondHome</h1>
+            <h1 className="text-xl font-bold tracking-tight text-foreground">
+              Little Gems by My Second Home
+            </h1>
           </div>
           <p className="text-sm text-muted-foreground">Staff Management Portal</p>
         </div>

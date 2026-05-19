@@ -15,7 +15,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 10%;
 
-    --primary: 37 90% 51%;
+    --primary: 346 47% 29%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 15% 93%;
@@ -24,7 +24,7 @@
     --muted: 220 15% 93%;
     --muted-foreground: 220 10% 45%;
 
-    --accent: 37 90% 51%;
+    --accent: 346 47% 29%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
@@ -32,18 +32,18 @@
 
     --border: 220 15% 90%;
     --input: 220 15% 85%;
-    --ring: 37 90% 51%;
+    --ring: 346 47% 29%;
 
     --radius: 0.5rem;
 
     --sidebar-background: 216 40% 15%;
     --sidebar-foreground: 216 15% 70%;
-    --sidebar-primary: 37 90% 51%;
+    --sidebar-primary: 346 47% 29%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 216 35% 20%;
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 216 35% 20%;
-    --sidebar-ring: 37 90% 51%;
+    --sidebar-ring: 346 47% 29%;
     --sidebar-muted: 216 15% 50%;
   }
 
@@ -54,27 +54,27 @@
     --card-foreground: 210 40% 98%;
     --popover: 222.2 84% 4.9%;
     --popover-foreground: 210 40% 98%;
-    --primary: 37 90% 51%;
+    --primary: 346 47% 29%;
     --primary-foreground: 0 0% 100%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
     --muted: 217.2 32.6% 17.5%;
     --muted-foreground: 215 20.2% 65.1%;
-    --accent: 37 90% 51%;
+    --accent: 346 47% 29%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 37 90% 51%;
+    --ring: 346 47% 29%;
     --sidebar-background: 216 40% 10%;
     --sidebar-foreground: 216 15% 70%;
-    --sidebar-primary: 37 90% 51%;
+    --sidebar-primary: 346 47% 29%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 216 35% 15%;
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 216 35% 15%;
-    --sidebar-ring: 37 90% 51%;
+    --sidebar-ring: 346 47% 29%;
   }
 }
 
