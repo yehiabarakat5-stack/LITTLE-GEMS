@@ -1,0 +1,44 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.env
+.env.*
+!.env.example
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Cursor MCP — contains Supabase Personal Access Token, never commit
+.cursor/mcp.json
+.cursor/mcp.local.json
+
+# Local tooling / Supabase temp
+.claude/
+supabase/.temp/
+.vercel
+
+# Standalone WhatsApp agent artifacts
+whatsapp-agent/node_modules/
+whatsapp-agent/.wwebjs_auth/
+whatsapp-agent/.wwebjs_cache/
+whatsapp-agent/.env
+whatsapp-agent/.railway-log-state*.json
+.env*.local
