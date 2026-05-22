@@ -109,7 +109,11 @@ import {
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
 import { extractErrorMessage } from "@/lib/errors";
-import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
+import {
+  DEFAULT_DOG_SIZE,
+  LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS,
+  type LittleGemsDogSizeFormValue,
+} from "@/lib/dogSizeForm";
 import {
   Check,
   ChevronLeft,
@@ -1058,8 +1062,8 @@ type NewBookingForm = {
       special_instructions: string;
     }
   >;
-  /** Client-selected size (Small / Medium / Large / Extra Large). */
-  dog_size: DogSizeFormValue;
+  /** Client-selected size (Small / Medium). */
+  dog_size: LittleGemsDogSizeFormValue;
 };
 
 const BLANK_FORM: NewBookingForm = {
@@ -2165,6 +2169,7 @@ export function DogBoardingCalendar({
                 name="boarding-dog-new-booking"
                 value={form.dog_size}
                 onChange={(v) => setForm((f) => ({ ...f, dog_size: v }))}
+                options={LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS}
               />
             </div>
 

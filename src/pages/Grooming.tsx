@@ -79,7 +79,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PetSpecialAlertsBanner } from "@/components/PetSpecialAlertsBanner";
 import { DogSizeField } from "@/components/DogSizeField";
 import { parsePetSpecialAlerts, petHasSpecialAlerts } from "@/lib/petAlerts";
-import type { DogSizeFormValue } from "@/lib/dogSizeForm";
+import {
+  LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS,
+  type LittleGemsDogSizeFormValue,
+} from "@/lib/dogSizeForm";
 import {
   computeNewGroomingAppointmentOriginalAed,
   clampMattingFeeAed,
@@ -766,7 +769,7 @@ const GroomingPage = () => {
   ]);
   const [mattingFeeAed, setMattingFeeAed] = useState(String(MATTING_FEE_AED_MIN));
   const [heavyDogFeeAed, setHeavyDogFeeAed] = useState(String(HEAVY_DOG_FEE_AED_MIN));
-  const [dogSize, setDogSize] = useState<DogSizeFormValue | null>(null);
+  const [dogSize, setDogSize] = useState<LittleGemsDogSizeFormValue | null>(null);
   const [apptDate, setApptDate] = useState<Date>(new Date());
   const [groomingDate, setGroomingDate] = useState<Date>(new Date());
   const [apptTime, setApptTime] = useState("10:00");
@@ -2520,6 +2523,7 @@ const GroomingPage = () => {
                 name="grooming-new-appt-dog-size"
                 value={dogSize}
                 onChange={setDogSize}
+                options={LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS}
               />
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

@@ -16,6 +16,11 @@
  */
 export const DOG_SIZE_FORM_OPTIONS = ["Small", "Medium", "Large", "Extra Large"] as const;
 
+/** Boarding and grooming intake — Little Gems serves small and medium dogs only. */
+export const LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS = ["Small", "Medium"] as const;
+
 export type DogSizeFormValue = (typeof DOG_SIZE_FORM_OPTIONS)[number];
+
+export type LittleGemsDogSizeFormValue = (typeof LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS)[number];
 
 export const DEFAULT_DOG_SIZE: DogSizeFormValue = "Medium";
