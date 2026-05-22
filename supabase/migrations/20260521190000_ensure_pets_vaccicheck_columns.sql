@@ -1,5 +1,4 @@
--- Vaccicheck (serology titre) fields on pets — run in Supabase SQL Editor once.
--- Stores report file URL + S-class ratings per virus + overall immunity wording.
+-- Idempotent: ensure all VacciCheck / titre columns exist on pets.
 
 ALTER TABLE public.pets
   ADD COLUMN IF NOT EXISTS vaccicheck_report_url text,
@@ -17,11 +16,3 @@ COMMENT ON COLUMN public.pets.vaccicheck_parvovirus_tier IS 'Titre class e.g. S0
 COMMENT ON COLUMN public.pets.vaccicheck_hepatitis_tier IS 'Titre class e.g. S0–S6 (adenovirus/hepatitis)';
 COMMENT ON COLUMN public.pets.vaccicheck_immunity_rating IS 'Overall interpretation e.g. Good immunity';
 COMMENT ON COLUMN public.pets.vaccicheck_performed_at IS 'Clinic or location where VacciCheck / titre serology was performed';
-
-NOTIFY pgrst, 'reload schema';
-
-SELECT 'pets vaccicheck columns applied' AS status;
-
--- Storage: reports go to bucket `pet-photos` under `vaccicheck/{petId}/`.
--- If upload fails with permission errors, add Storage RLS policies for that prefix
--- (same pattern as `passports/{petId}/` if you use path-based policies).
