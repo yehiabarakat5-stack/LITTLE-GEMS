@@ -71,7 +71,7 @@ export function buildBoardingTags(input: {
   if (tags.length === 0) {
     tags.push({
       key: "status",
-      label: input.status.replace(/_/g, " "),
+      label: (input.status ?? "unknown").replace(/_/g, " "),
       tone: "muted",
     });
   }

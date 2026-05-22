@@ -296,7 +296,7 @@ export async function createBookingInvoice(params: AutoInvoiceParams): Promise<v
   const occ = occupancyTag(petCount);
   const nightlyRate = rateResolved.unitPrice;
 
-  const typeLabel = roomType.replace(/_/g, " ");
+  const typeLabel = (roomType ?? "room").replace(/_/g, " ");
   const occLabel = petCount > 1 ? ` (${occ})` : "";
   const lineLabel = roomName
     ? `${roomName} — ${typeLabel}${occLabel} — ${nights} night${nights !== 1 ? "s" : ""}`

@@ -165,6 +165,23 @@ const DAYS = 14;
 const ROOM_COL_W = 160; // px
 const DAY_COL_W = 100;  // px
 
+/** Rooms missing `wing` in the DB are grouped here (avoids null.replace crashes). */
+const UNASSIGNED_WING = "__unassigned__";
+
+function formatSlugLabel(value: string | null | undefined, fallback = "—"): string {
+  if (value == null || value === "") return fallback;
+  return value.replace(/_/g, " ");
+}
+
+function formatStatusLabel(status: string | null | undefined): string {
+  if (!status) return "—";
+  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function normalizeRoomWing(wing: string | null | undefined): string {
+  return wing ?? UNASSIGNED_WING;
+}
+
 const WING_LABELS: Record<string, string> = {
   oxford: "Oxford Street",
   piccadilly: "Piccadilly",
@@ -190,6 +207,7 @@ const WING_LABELS: Record<string, string> = {
   grooming_room: "Grooming Room",
   training_room: "Training Room",
   kitchen: "Kitchen",
+  [UNASSIGNED_WING]: "Unassigned",
 };
 
 const WING_ORDER: string[] = [
@@ -490,7 +508,8 @@ function selectedPetsSizeSummary(
     .join(", ");
 }
 
-function escapeHtml(value: string): string {
+function escapeHtml(value: string | null | undefined): string {
+  if (value == null) return "";
   return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -504,7 +523,7 @@ function renderKennelCardHtml(booking: BookingWithDetails, todayDate: string): s
   const roomName = booking.rooms?.room_number ?? booking.rooms?.display_name ?? "—";
   const notes = booking.notes || "No booking notes";
   const bookingRef = booking.booking_ref ?? booking.id.slice(0, 8);
-  const status = booking.status.replace(/_/g, " ");
+  const status = formatSlugLabel(booking.status);
   const nights = nightsBetween(booking.check_in_date, booking.check_out_date);
   const petItems = booking.booking_pets
     .map((bp) => {
@@ -704,7 +723,7 @@ function boardingOperationsBoardingType(booking: BookingWithDetails): string {
   if (!r) return "—";
   const dn = r.display_name?.trim();
   if (dn) return dn;
-  return r.room_type.replace(/_/g, " ");
+  return formatSlugLabel(r.room_type);
 }
 
 function boardingOperationsKennelCell(booking: BookingWithDetails): string {
@@ -1188,9 +1207,11 @@ export function DogBoardingCalendar({
   const roomsByWing = useMemo(() => {
     const map = new Map<string, typeof rooms>();
     WING_ORDER.forEach((w) => map.set(w, []));
+    map.set(UNASSIGNED_WING, []);
     rooms.forEach((r) => {
-      if (!map.has(r.wing)) map.set(r.wing, []);
-      map.get(r.wing)!.push(r);
+      const wing = normalizeRoomWing(r.wing);
+      if (!map.has(wing)) map.set(wing, []);
+      map.get(wing)!.push(r);
     });
     return map;
   }, [rooms]);
@@ -1582,7 +1603,7 @@ export function DogBoardingCalendar({
                       style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}
                     >
                       <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {WING_LABELS[wing] ?? wing.replace(/_/g, " ")}
+                        {WING_LABELS[wing] ?? formatSlugLabel(wing)}
                       </div>
                     </div>
 
@@ -1797,7 +1818,7 @@ export function DogBoardingCalendar({
                     {form.room_id ? (() => {
                       const sel = rooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
-                      const wl = WING_LABELS[sel.wing] ?? sel.wing.replace(/_/g, " ");
+                      const wl = WING_LABELS[normalizeRoomWing(sel.wing)] ?? formatSlugLabel(sel.wing);
                       return `${wl} | ${sel.room_number} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
                     })() : "Select room"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1808,12 +1829,12 @@ export function DogBoardingCalendar({
                     const r = rooms.find((rm) => rm.id === value);
                     if (!r) return 0;
                     const q = search.toLowerCase();
-                    const wl = (WING_LABELS[r.wing] ?? r.wing.replace(/_/g, " ")).toLowerCase();
+                    const wl = (WING_LABELS[normalizeRoomWing(r.wing)] ?? formatSlugLabel(r.wing)).toLowerCase();
                     if (
                       r.display_name.toLowerCase().includes(q) ||
                       r.room_number.toLowerCase().includes(q) ||
                       wl.includes(q) ||
-                      r.wing.toLowerCase().includes(q)
+                      (r.wing ?? "").toLowerCase().includes(q)
                     ) return 1;
                     return 0;
                   }}>
@@ -1823,7 +1844,7 @@ export function DogBoardingCalendar({
                       {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
                         const wingRooms = roomsByWing.get(wing) ?? [];
                         if (wingRooms.length === 0) return null;
-                        const wingLabel = WING_LABELS[wing] ?? wing.replace(/_/g, " ");
+                        const wingLabel = WING_LABELS[wing] ?? formatSlugLabel(wing);
                         return (
                           <CommandGroup key={wing} heading={wingLabel}>
                             {wingRooms.map((r) => (
@@ -2272,7 +2293,7 @@ export function DogBoardingCalendar({
                 {/* Status */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant="outline" className={STATUS_BADGE[detailBooking.status]}>
-                    {detailBooking.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                    {formatStatusLabel(detailBooking.status)}
                   </Badge>
                   {detailBooking.do_not_move && (
                     <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200">
@@ -3711,7 +3732,7 @@ function CatBoardingCalendar({
               </SheetHeader>
               <div className="mt-6 space-y-5">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant="outline" className={STATUS_BADGE[detailBooking.status]}>{detailBooking.status.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}</Badge>
+                  <Badge variant="outline" className={STATUS_BADGE[detailBooking.status]}>{formatStatusLabel(detailBooking.status)}</Badge>
                   {detailBooking.do_not_move && <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200">DO NOT MOVE</Badge>}
                 </div>
                 <Separator />
