@@ -182,6 +182,28 @@ function normalizeRoomWing(wing: string | null | undefined): string {
   return wing ?? UNASSIGNED_WING;
 }
 
+/** Primary label for room pickers: "DELUXE - 1" from display_name, else type + number. */
+function formatRoomPickerLabel(room: {
+  display_name?: string | null;
+  room_number?: string | null;
+  room_type?: string | null;
+}): string {
+  const name = room.display_name?.trim();
+  if (name) return name;
+  const num = room.room_number?.trim() ?? "";
+  const type = formatSlugLabel(room.room_type, "");
+  if (type && num) return `${type} — ${num}`;
+  return num || type || "—";
+}
+
+function formatRoomPickerMeta(room: {
+  room_type?: string | null;
+  capacity_type?: string | null;
+}): string {
+  const parts = [formatSlugLabel(room.room_type, ""), room.capacity_type].filter(Boolean);
+  return parts.join(" · ");
+}
+
 const WING_LABELS: Record<string, string> = {
   oxford: "Oxford Street",
   piccadilly: "Piccadilly",
@@ -1615,9 +1637,16 @@ export function DogBoardingCalendar({
                           style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
                           className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
                         >
-                          <span className="truncate" title={`${room.room_number} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
-                            <span className="font-medium">{room.room_number}</span>
-                            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{room.room_type?.replace(/_/g, " ")} · {room.capacity_type}</span>
+                          <span
+                            className="truncate"
+                            title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
+                          >
+                            <span className="font-medium">{formatRoomPickerLabel(room)}</span>
+                            {formatRoomPickerMeta(room) ? (
+                              <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">
+                                {formatRoomPickerMeta(room)}
+                              </span>
+                            ) : null}
                           </span>
                         </div>
                         {/* Day cells */}
@@ -1819,7 +1848,7 @@ export function DogBoardingCalendar({
                       const sel = rooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
                       const wl = WING_LABELS[normalizeRoomWing(sel.wing)] ?? formatSlugLabel(sel.wing);
-                      return `${wl} | ${sel.room_number} — ${sel.room_type?.replace(/_/g, " ")} · ${sel.capacity_type}`;
+                      return `${wl} | ${formatRoomPickerLabel(sel)}`;
                     })() : "Select room"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -1831,8 +1860,8 @@ export function DogBoardingCalendar({
                     const q = search.toLowerCase();
                     const wl = (WING_LABELS[normalizeRoomWing(r.wing)] ?? formatSlugLabel(r.wing)).toLowerCase();
                     if (
-                      r.display_name.toLowerCase().includes(q) ||
-                      r.room_number.toLowerCase().includes(q) ||
+                      (r.display_name ?? "").toLowerCase().includes(q) ||
+                      (r.room_number ?? "").toLowerCase().includes(q) ||
                       wl.includes(q) ||
                       (r.wing ?? "").toLowerCase().includes(q)
                     ) return 1;
@@ -1857,7 +1886,12 @@ export function DogBoardingCalendar({
                                 }}
                               >
                                 <Check className={`mr-2 h-4 w-4 ${form.room_id === r.id ? "opacity-100" : "opacity-0"}`} />
-                                {r.room_number} — <span className="capitalize text-muted-foreground ml-1">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
+                                <span className="font-medium">{formatRoomPickerLabel(r)}</span>
+                                {formatRoomPickerMeta(r) ? (
+                                  <span className="ml-1.5 capitalize text-muted-foreground text-xs">
+                                    {formatRoomPickerMeta(r)}
+                                  </span>
+                                ) : null}
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -3195,9 +3229,16 @@ function CatBoardingCalendar({
                     {tierRooms.map((room) => (
                       <div key={room.id} className="flex">
                         <div style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
-                          <span className="truncate" title={`${room.room_number} — ${room.room_type?.replace(/_/g, " ")} (${room.capacity_type})`}>
-                            <span className="font-medium">{room.room_number}</span>
-                            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{room.room_type?.replace(/_/g, " ")} · {room.capacity_type}</span>
+                          <span
+                            className="truncate"
+                            title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
+                          >
+                            <span className="font-medium">{formatRoomPickerLabel(room)}</span>
+                            {formatRoomPickerMeta(room) ? (
+                              <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">
+                                {formatRoomPickerMeta(room)}
+                              </span>
+                            ) : null}
                           </span>
                         </div>
                         {renderRoomRow(room.id)}
@@ -3383,7 +3424,12 @@ function CatBoardingCalendar({
                         <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase">{CAT_TIER_LABELS[tier]}</div>
                         {tr.map((r) => (
                           <SelectItem key={r.id} value={r.id}>
-                            {r.room_number} — <span className="capitalize text-muted-foreground">{r.room_type?.replace(/_/g, " ")} · {r.capacity_type}</span>
+                            <span className="font-medium">{formatRoomPickerLabel(r)}</span>
+                            {formatRoomPickerMeta(r) ? (
+                              <span className="ml-1.5 capitalize text-muted-foreground text-xs">
+                                {formatRoomPickerMeta(r)}
+                              </span>
+                            ) : null}
                           </SelectItem>
                         ))}
                       </div>

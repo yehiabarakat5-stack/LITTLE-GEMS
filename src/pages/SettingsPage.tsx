@@ -110,10 +110,14 @@ const SettingsPage = () => {
   const handleSave = async () => {
     setSaving(true);
 
-    const { error } = await supabase
-      .from("system_context")
-      .update({ content: rulesContent })
-      .eq("key", "business_rules");
+    const { error } = await supabase.from("system_context").upsert(
+      {
+        key: "business_rules",
+        content: rulesContent,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "key" },
+    );
 
     if (error) {
       setSaveResult("error");
