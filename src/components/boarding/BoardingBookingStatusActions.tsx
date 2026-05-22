@@ -94,77 +94,78 @@ export function BoardingBookingStatusActions({
 }: BoardingBookingStatusActionsProps) {
   const btn = (key: BoardingCalendarStatusKey) => getBoardingStatusColorStyle(statusColors, key);
 
-  if (bookingStatus === "cancelled") {
-    return <p className="text-sm text-muted-foreground">This booking was cancelled.</p>;
-  }
+  const isCancelled = bookingStatus === "cancelled";
+  const canFollowUp = !isCancelled && bookingStatus !== "enquiry";
+  const canCheckIn = !isCancelled && (bookingStatus === "enquiry" || bookingStatus === "no_show");
+  const canStart = !isCancelled && bookingStatus === "confirmed";
+  const canUndoStart = !isCancelled && bookingStatus === "checked_in";
+  const canCompleted = !isCancelled && bookingStatus === "checked_in";
+  const canTakePayment = !isCancelled && bookingStatus === "checked_out";
 
   return (
     <div className="flex flex-col gap-2">
-      {(bookingStatus === "confirmed" ||
-        bookingStatus === "checked_in" ||
-        bookingStatus === "checked_out" ||
-        bookingStatus === "no_show") && (
-        <StatusColorButton
-          label="Follow up"
-          style={btn("follow_up")}
-          onClick={onFollowUp}
-          disabled={bookingStatus === "enquiry"}
-          pending={isPending}
-        />
-      )}
+      {isCancelled ? (
+        <p className="text-sm text-muted-foreground">This booking was cancelled.</p>
+      ) : null}
 
-      {(bookingStatus === "enquiry" || bookingStatus === "no_show") && (
-        <StatusColorButton
-          label="Check in"
-          style={btn("check_in")}
-          onClick={onCheckInStatus}
-          pending={isPending}
-        />
-      )}
+      <StatusColorButton
+        label="Follow up"
+        style={btn("follow_up")}
+        onClick={onFollowUp}
+        disabled={!canFollowUp}
+        pending={isPending}
+      />
+      <StatusColorButton
+        label="Check in"
+        style={btn("check_in")}
+        onClick={onCheckInStatus}
+        disabled={!canCheckIn}
+        pending={isPending}
+      />
+      <StatusColorButton
+        label="Start"
+        style={btn("start")}
+        onClick={onStart}
+        disabled={!canStart}
+        pending={isPending}
+      />
+      <StatusColorButton
+        label="Undo start"
+        style={btn("undo_start")}
+        onClick={onUndoStart}
+        disabled={!canUndoStart}
+        pending={isPending}
+      />
+      <StatusColorButton
+        label="Completed"
+        style={btn("completed")}
+        onClick={onCompleted}
+        disabled={!canCompleted}
+        pending={isPending}
+      />
+      <StatusColorButton
+        label="Take payment"
+        style={btn("take_payment")}
+        onClick={onTakePayment}
+        disabled={!canTakePayment}
+        pending={isPending}
+      />
 
-      {bookingStatus === "confirmed" && (
-        <StatusColorButton label="Start" style={btn("start")} onClick={onStart} pending={isPending} />
-      )}
-
-      {bookingStatus === "checked_in" && (
-        <>
-          <StatusColorButton
-            label="Undo start"
-            style={btn("undo_start")}
-            onClick={onUndoStart}
-            pending={isPending}
-          />
-          <StatusColorButton
-            label="Completed"
-            style={btn("completed")}
-            onClick={onCompleted}
-            pending={isPending}
-          />
-          {onViewBelongings ? (
-            <button
-              type="button"
-              className="w-full rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted/50"
-              onClick={onViewBelongings}
-            >
-              View belongings
-            </button>
-          ) : null}
-        </>
-      )}
-
-      {bookingStatus === "checked_out" && (
-        <StatusColorButton
-          label="Take payment"
-          style={btn("take_payment")}
-          onClick={onTakePayment}
-          pending={isPending}
-        />
-      )}
+      {onViewBelongings && bookingStatus === "checked_in" ? (
+        <button
+          type="button"
+          className="w-full rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted/50"
+          onClick={onViewBelongings}
+        >
+          View belongings
+        </button>
+      ) : null}
 
       <StatusColorButton
         label="Cancel Booking"
         style={CANCEL_BOOKING_BUTTON_COLORS}
         onClick={onCancelBooking}
+        disabled={isCancelled}
         pending={isPending}
       />
     </div>
