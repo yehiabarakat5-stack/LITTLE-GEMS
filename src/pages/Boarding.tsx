@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,6 +14,7 @@ import TopBar from "@/components/dashboard/TopBar";
 import {
   useBookings,
   useRooms,
+  useBoardingRooms,
   useCreateBooking,
   useUpdateBooking,
   isAssessmentRequiredError,
@@ -162,8 +163,71 @@ function showCreateBookingErrorToast(options: {
 }
 
 const DAYS = 14;
-const ROOM_COL_W = 160; // px
-const DAY_COL_W = 100;  // px
+const ROOM_COL_MIN = 120;
+const ROOM_COL_MAX = 400;
+const ROOM_COL_DEFAULT = 160;
+const DAY_COL_W = 100; // px
+const CALENDAR_ROOMS_BATCH = 40;
+
+function useResizableRoomColumnWidth() {
+  const [roomColWidth, setRoomColWidth] = useState(ROOM_COL_DEFAULT);
+  const dragRef = useRef({ active: false, startX: 0, startW: ROOM_COL_DEFAULT });
+
+  const onRoomColResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { active: true, startX: e.clientX, startW: roomColWidth };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current.active) return;
+      const delta = ev.clientX - dragRef.current.startX;
+      const next = Math.min(
+        ROOM_COL_MAX,
+        Math.max(ROOM_COL_MIN, dragRef.current.startW + delta),
+      );
+      setRoomColWidth(next);
+    };
+
+    const onUp = () => {
+      dragRef.current.active = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [roomColWidth]);
+
+  return { roomColWidth, onRoomColResizeStart };
+}
+
+function groupRoomsByWing(rooms: Room[]): Map<string, Room[]> {
+  const map = new Map<string, Room[]>();
+  WING_ORDER.forEach((w) => map.set(w, []));
+  map.set(UNASSIGNED_WING, []);
+  for (const r of rooms) {
+    const wing = normalizeRoomWing(r.wing);
+    if (!map.has(wing)) map.set(wing, []);
+    map.get(wing)!.push(r);
+  }
+  return map;
+}
+
+function RoomColumnResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize room name column"
+      title="Drag to resize"
+      className="absolute right-0 top-0 z-30 h-full w-1.5 cursor-col-resize touch-none bg-transparent hover:bg-primary/25 active:bg-primary/40"
+      onMouseDown={onMouseDown}
+    />
+  );
+}
 
 /** Rooms missing `wing` in the DB are grouped here (avoids null.replace crashes). */
 const UNASSIGNED_WING = "__unassigned__";
@@ -999,7 +1063,13 @@ export function DogBoardingCalendar({
   // data
   const queryClient = useQueryClient();
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
-  const { data: rooms = [], isLoading: roomsLoading } = useRooms();
+  const { data: rooms = [], isLoading: roomsLoading } = useBoardingRooms("dog");
+  const { roomColWidth, onRoomColResizeStart } = useResizableRoomColumnWidth();
+  const [visibleRoomLimit, setVisibleRoomLimit] = useState(CALENDAR_ROOMS_BATCH);
+
+  useEffect(() => {
+    setVisibleRoomLimit(CALENDAR_ROOMS_BATCH);
+  }, [windowStart]);
 
   // drawer / panel state
   const [newBookingOpen, setNewBookingOpen] = useState(false);
@@ -1225,18 +1295,30 @@ export function DogBoardingCalendar({
     return Array.from({ length: DAYS }, (_, i) => addDays(windowStart, i));
   }, [windowStart]);
 
-  // rooms grouped by wing
-  const roomsByWing = useMemo(() => {
-    const map = new Map<string, typeof rooms>();
-    WING_ORDER.forEach((w) => map.set(w, []));
-    map.set(UNASSIGNED_WING, []);
-    rooms.forEach((r) => {
-      const wing = normalizeRoomWing(r.wing);
-      if (!map.has(wing)) map.set(wing, []);
-      map.get(wing)!.push(r);
-    });
-    return map;
-  }, [rooms]);
+  // rooms grouped by wing (full list for picker; grid uses paginated slice)
+  const roomsByWing = useMemo(() => groupRoomsByWing(rooms), [rooms]);
+
+  const orderedCalendarRooms = useMemo(() => {
+    const extraWings = [...roomsByWing.keys()].filter((w) => !WING_ORDER.includes(w));
+    const wings = [...WING_ORDER, UNASSIGNED_WING, ...extraWings];
+    const out: Room[] = [];
+    for (const wing of wings) {
+      out.push(...(roomsByWing.get(wing) ?? []));
+    }
+    return out;
+  }, [roomsByWing]);
+
+  const visibleCalendarRooms = useMemo(
+    () => orderedCalendarRooms.slice(0, visibleRoomLimit),
+    [orderedCalendarRooms, visibleRoomLimit],
+  );
+
+  const calendarRoomsByWing = useMemo(
+    () => groupRoomsByWing(visibleCalendarRooms),
+    [visibleCalendarRooms],
+  );
+
+  const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
 
   // booking lookup: roomId → bookings (for this window)
   const bookingsByRoom = useMemo(() => {
@@ -1587,14 +1669,16 @@ export function DogBoardingCalendar({
               {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
           ) : (
-            <div style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}>
+            <div style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}>
 
               {/* Sticky header row */}
               <div className="flex sticky top-0 z-20 bg-card border-b border-border">
                 <div
-                  style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
-                  className="shrink-0 border-r border-border"
-                />
+                  style={{ minWidth: roomColWidth, width: roomColWidth }}
+                  className="relative shrink-0 border-r border-border"
+                >
+                  <RoomColumnResizeHandle onMouseDown={onRoomColResizeStart} />
+                </div>
                 {days.map((day) => {
                   const todayHighlight = isToday(day);
                   return (
@@ -1614,15 +1698,15 @@ export function DogBoardingCalendar({
               </div>
 
               {/* Wing groups + room rows */}
-              {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
-                const wingRooms = roomsByWing.get(wing) ?? [];
+              {[...WING_ORDER, UNASSIGNED_WING, ...Array.from(calendarRoomsByWing.keys()).filter((w) => !WING_ORDER.includes(w) && w !== UNASSIGNED_WING)].map((wing) => {
+                const wingRooms = calendarRoomsByWing.get(wing) ?? [];
                 if (wingRooms.length === 0) return null;
                 return (
                   <div key={wing}>
                     {/* Wing header */}
                     <div
                       className="flex sticky left-0 bg-slate-50 border-b border-t border-border"
-                      style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}
+                      style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}
                     >
                       <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         {WING_LABELS[wing] ?? formatSlugLabel(wing)}
@@ -1634,7 +1718,7 @@ export function DogBoardingCalendar({
                       <div key={room.id} className="flex">
                         {/* Room label */}
                         <div
-                          style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }}
+                          style={{ minWidth: roomColWidth, width: roomColWidth }}
                           className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
                         >
                           <span
@@ -1656,6 +1740,22 @@ export function DogBoardingCalendar({
                   </div>
                 );
               })}
+
+              {hasMoreCalendarRooms ? (
+                <div className="flex justify-center border-t border-border bg-card p-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setVisibleRoomLimit((n) =>
+                        Math.min(n + CALENDAR_ROOMS_BATCH, orderedCalendarRooms.length),
+                      )
+                    }
+                  >
+                    Load more rooms ({visibleCalendarRooms.length} of {orderedCalendarRooms.length})
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -2673,12 +2773,13 @@ function CatBoardingCalendar({
 
   const queryClient = useQueryClient();
   const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
-  const { data: roomsAll = [], isLoading: roomsLoading } = useRooms();
+  const { data: catRooms = [], isLoading: roomsLoading } = useBoardingRooms("cat");
+  const { roomColWidth, onRoomColResizeStart } = useResizableRoomColumnWidth();
+  const [visibleRoomLimit, setVisibleRoomLimit] = useState(CALENDAR_ROOMS_BATCH);
 
-  const catRooms = useMemo(
-    () => roomsAll.filter((r) => r.wing === "cattery"),
-    [roomsAll],
-  );
+  useEffect(() => {
+    setVisibleRoomLimit(CALENDAR_ROOMS_BATCH);
+  }, [windowStart]);
 
   const roomsByTier = useMemo(() => {
     const map = new Map<CatRoomType, Room[]>();
@@ -2689,6 +2790,31 @@ function CatBoardingCalendar({
     });
     return map;
   }, [catRooms]);
+
+  const orderedCalendarRooms = useMemo(() => {
+    const out: Room[] = [];
+    for (const tier of CAT_TIER_ORDER) {
+      out.push(...(roomsByTier.get(tier) ?? []));
+    }
+    return out;
+  }, [roomsByTier]);
+
+  const visibleCalendarRooms = useMemo(
+    () => orderedCalendarRooms.slice(0, visibleRoomLimit),
+    [orderedCalendarRooms, visibleRoomLimit],
+  );
+
+  const calendarRoomsByTier = useMemo(() => {
+    const map = new Map<CatRoomType, Room[]>();
+    CAT_TIER_ORDER.forEach((t) => map.set(t, []));
+    visibleCalendarRooms.forEach((r) => {
+      const rt = r.room_type as CatRoomType;
+      if (map.has(rt)) map.get(rt)!.push(r);
+    });
+    return map;
+  }, [visibleCalendarRooms]);
+
+  const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
 
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
@@ -3204,9 +3330,14 @@ function CatBoardingCalendar({
           ) : catRooms.length === 0 ? (
             <p className="p-8 text-sm text-muted-foreground">No active cat boarding rooms found. Add rooms with cat wing in Settings &rarr; Rooms.</p>
           ) : (
-            <div style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}>
+            <div style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}>
               <div className="flex sticky top-0 z-20 bg-card border-b border-border">
-                <div style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }} className="shrink-0 border-r border-border" />
+                <div
+                  style={{ minWidth: roomColWidth, width: roomColWidth }}
+                  className="relative shrink-0 border-r border-border"
+                >
+                  <RoomColumnResizeHandle onMouseDown={onRoomColResizeStart} />
+                </div>
                 {days.map((day) => {
                   const todayHighlight = isToday(day);
                   return (
@@ -3219,16 +3350,16 @@ function CatBoardingCalendar({
               </div>
 
               {CAT_TIER_ORDER.map((tier) => {
-                const tierRooms = roomsByTier.get(tier) ?? [];
+                const tierRooms = calendarRoomsByTier.get(tier) ?? [];
                 if (tierRooms.length === 0) return null;
                 return (
                   <div key={tier}>
-                    <div className="flex sticky left-0 bg-violet-50 border-b border-t border-border" style={{ minWidth: ROOM_COL_W + DAY_COL_W * DAYS }}>
+                    <div className="flex sticky left-0 bg-violet-50 border-b border-t border-border" style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}>
                       <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-violet-900">{CAT_TIER_LABELS[tier]}</div>
                     </div>
                     {tierRooms.map((room) => (
                       <div key={room.id} className="flex">
-                        <div style={{ minWidth: ROOM_COL_W, width: ROOM_COL_W }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
+                        <div style={{ minWidth: roomColWidth, width: roomColWidth }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
                           <span
                             className="truncate"
                             title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
@@ -3247,6 +3378,22 @@ function CatBoardingCalendar({
                   </div>
                 );
               })}
+
+              {hasMoreCalendarRooms ? (
+                <div className="flex justify-center border-t border-border bg-card p-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setVisibleRoomLimit((n) =>
+                        Math.min(n + CALENDAR_ROOMS_BATCH, orderedCalendarRooms.length),
+                      )
+                    }
+                  >
+                    Load more rooms ({visibleCalendarRooms.length} of {orderedCalendarRooms.length})
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </div>

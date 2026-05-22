@@ -6,6 +6,7 @@ import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 import {
   createRoomsAdminRoom,
   fetchAllRooms,
+  fetchBoardingCalendarRooms,
   fetchRoomsForAdmin,
   updateRoomsAdminRoom,
   type RoomsAdminInsert,
@@ -186,6 +187,24 @@ export function useRooms() {
     queryKey: queryKeys.rooms(),
     enabled: !!session,
     queryFn: () => fetchAllRooms(true),
+  });
+}
+
+/** Active rooms for boarding calendar — lighter query, filtered by species in the hook. */
+export function useBoardingRooms(species: "dog" | "cat" = "dog") {
+  const { session } = useAuth();
+  return useQuery({
+    queryKey: [...queryKeys.rooms(), "boarding", "active", species] as const,
+    enabled: !!session,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const rows = await fetchBoardingCalendarRooms();
+      return rows.filter((r) => {
+        if (r.is_active === false) return false;
+        if (species === "cat") return r.wing === "cattery";
+        return r.wing !== "cattery";
+      });
+    },
   });
 }
 

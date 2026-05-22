@@ -36,6 +36,10 @@ const ROOMS_PAGE_SIZE = 1000;
 const ROOMS_BOARDING_SELECT =
   "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active";
 
+/** Lighter select for calendar grid + room picker (boarding page). */
+const ROOMS_BOARDING_CALENDAR_SELECT =
+  "id, display_name, room_number, wing, room_type, capacity_type, is_active";
+
 const ROOMS_ADMIN_SELECT_VARIANTS = [
   "id, display_name, color, room_number, max_pets, cam_number, camera_recording, is_active",
   "id, display_name, label_color, room_number, max_pets, cam_number, camera_recording, is_active",
@@ -142,6 +146,12 @@ async function fetchWithSelectVariants(
 /** Loads rooms for boarding (wing / type / capacity). */
 export async function fetchAllRooms(activeOnly = false): Promise<Room[]> {
   const rows = await fetchRoomsPaginated(ROOMS_BOARDING_SELECT, activeOnly);
+  return rows as Room[];
+}
+
+/** Active rooms only, minimal columns — used by the boarding calendar. */
+export async function fetchBoardingCalendarRooms(): Promise<Room[]> {
+  const rows = await fetchRoomsPaginated(ROOMS_BOARDING_CALENDAR_SELECT, true);
   return rows as Room[];
 }
 
