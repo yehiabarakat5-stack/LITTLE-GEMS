@@ -86,6 +86,11 @@ import {
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { BoardingCalendarBookingChip } from "@/components/boarding/BoardingCalendarBookingChip";
 import {
+  BoardingCalendarRoomFilter,
+  calendarRoomRowClassName,
+  useCalendarRoomScroll,
+} from "@/components/boarding/BoardingCalendarRoomFilter";
+import {
   BoardingBookingStatusActions,
   BoardingRealRoomPicker,
 } from "@/components/boarding/BoardingBookingStatusActions";
@@ -1417,6 +1422,17 @@ export function DogBoardingCalendar({
 
   const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
 
+  const calendarFilterGroupKeys = useMemo(
+    () => wingKeysForDisplay(roomsByWing, WING_ORDER),
+    [roomsByWing],
+  );
+  const [calendarFilterRoomId, setCalendarFilterRoomId] = useState("");
+  const { scrollContainerRef, scrollToRoom, highlightRoomId } = useCalendarRoomScroll(
+    orderedCalendarRooms,
+    visibleRoomLimit,
+    setVisibleRoomLimit,
+  );
+
   const visibleRoomIds = useMemo(
     () => visibleCalendarRooms.map((r) => r.id),
     [visibleCalendarRooms],
@@ -1741,7 +1757,7 @@ export function DogBoardingCalendar({
         )}
 
         {/* ── Calendar ── */}
-        <div className={suppressToolbar ? "" : "flex-1 overflow-auto"}>
+        <div ref={scrollContainerRef} className={suppressToolbar ? "" : "flex-1 overflow-auto"}>
           {isLoading ? (
             <div className="p-8 space-y-3">
               {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
@@ -1753,8 +1769,20 @@ export function DogBoardingCalendar({
               <div className="flex sticky top-0 z-20 bg-card border-b border-border">
                 <div
                   style={{ minWidth: roomColWidth, width: roomColWidth }}
-                  className="relative shrink-0 border-r border-border"
+                  className="relative shrink-0 border-r border-border p-2"
                 >
+                  <BoardingCalendarRoomFilter
+                    rooms={orderedCalendarRooms}
+                    roomsByGroup={roomsByWing}
+                    groupKeys={calendarFilterGroupKeys}
+                    groupLabels={WING_LABELS}
+                    formatGroupLabel={(wing) => WING_LABELS[wing] ?? formatSlugLabel(wing)}
+                    selectedRoomId={calendarFilterRoomId}
+                    onSelectRoom={(roomId) => {
+                      setCalendarFilterRoomId(roomId);
+                      scrollToRoom(roomId);
+                    }}
+                  />
                   <RoomColumnResizeHandle onMouseDown={onRoomColResizeStart} />
                 </div>
                 {days.map((day) => {
@@ -1793,7 +1821,11 @@ export function DogBoardingCalendar({
 
                     {/* Room rows */}
                     {wingRooms.map((room) => (
-                      <div key={room.id} className="flex">
+                      <div
+                        key={room.id}
+                        data-calendar-room-id={room.id}
+                        className={calendarRoomRowClassName(highlightRoomId, room.id)}
+                      >
                         {/* Room label */}
                         <div
                           style={{ minWidth: roomColWidth, width: roomColWidth }}
@@ -2948,6 +2980,13 @@ function CatBoardingCalendar({
 
   const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
 
+  const [calendarFilterRoomId, setCalendarFilterRoomId] = useState("");
+  const { scrollContainerRef, scrollToRoom, highlightRoomId } = useCalendarRoomScroll(
+    orderedCalendarRooms,
+    visibleRoomLimit,
+    setVisibleRoomLimit,
+  );
+
   const visibleCatRoomIds = useMemo(
     () => visibleCalendarRooms.map((r) => r.id),
     [visibleCalendarRooms],
@@ -3460,7 +3499,7 @@ function CatBoardingCalendar({
           </div>
         )}
 
-        <div className={suppressToolbar ? "" : "flex-1 overflow-auto"}>
+        <div ref={scrollContainerRef} className={suppressToolbar ? "" : "flex-1 overflow-auto"}>
           {isLoading ? (
             <div className="p-8 space-y-3">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
           ) : catFacilityRooms.length === 0 ? (
@@ -3470,8 +3509,20 @@ function CatBoardingCalendar({
               <div className="flex sticky top-0 z-20 bg-card border-b border-border">
                 <div
                   style={{ minWidth: roomColWidth, width: roomColWidth }}
-                  className="relative shrink-0 border-r border-border"
+                  className="relative shrink-0 border-r border-border p-2"
                 >
+                  <BoardingCalendarRoomFilter
+                    rooms={orderedCalendarRooms}
+                    roomsByGroup={catPickerRoomsByWing}
+                    groupKeys={CAT_TIER_ORDER}
+                    groupLabels={CAT_TIER_LABELS}
+                    formatGroupLabel={(tier) => CAT_TIER_LABELS[tier as CatRoomType] ?? tier}
+                    selectedRoomId={calendarFilterRoomId}
+                    onSelectRoom={(roomId) => {
+                      setCalendarFilterRoomId(roomId);
+                      scrollToRoom(roomId);
+                    }}
+                  />
                   <RoomColumnResizeHandle onMouseDown={onRoomColResizeStart} />
                 </div>
                 {days.map((day) => {
@@ -3494,7 +3545,11 @@ function CatBoardingCalendar({
                       <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-violet-900">{CAT_TIER_LABELS[tier]}</div>
                     </div>
                     {tierRooms.map((room) => (
-                      <div key={room.id} className="flex">
+                      <div
+                        key={room.id}
+                        data-calendar-room-id={room.id}
+                        className={calendarRoomRowClassName(highlightRoomId, room.id)}
+                      >
                         <div style={{ minWidth: roomColWidth, width: roomColWidth }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
                           <span
                             className="truncate"
