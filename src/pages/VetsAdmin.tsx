@@ -230,12 +230,16 @@ const VetsAdminPage = () => {
             </Alert>
           )}
 
-          <motionSearchField search={search} setSearch={setSearch} />
+          <ClinicSearchField search={search} setSearch={setSearch} />
+
+          <p className="text-xs text-muted-foreground">
+            {filtered.length} of {clinics.length} clinic{clinics.length !== 1 ? "s" : ""}
+          </p>
 
           {clinicsQ.isLoading ? (
             <Skeleton className="h-96 w-full rounded-md" />
           ) : (
-            <motionClinicsTable
+            <ClinicsTable
               filtered={filtered}
               search={search}
               openEdit={openEdit}
@@ -243,10 +247,6 @@ const VetsAdminPage = () => {
               deleteClinic={deleteClinic}
             />
           )}
-
-          <p className="text-xs text-muted-foreground">
-            {filtered.length} of {clinics.length} clinic{clinics.length !== 1 ? "s" : ""}
-          </p>
         </div>
       </main>
 
@@ -317,7 +317,7 @@ const VetsAdminPage = () => {
   );
 };
 
-function motionSearchField({
+function ClinicSearchField({
   search,
   setSearch,
 }: {
@@ -337,7 +337,7 @@ function motionSearchField({
   );
 }
 
-function motionClinicsTable({
+function ClinicsTable({
   filtered,
   search,
   openEdit,
