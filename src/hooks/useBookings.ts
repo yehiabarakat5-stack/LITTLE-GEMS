@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
+import { extractErrorMessage, isMissingPostgrestColumnError } from "@/lib/errors";
 import {
   createRoomsAdminRoom,
   fetchRoomsForAdmin,
@@ -79,8 +80,42 @@ export type CreateBookingPayload = Omit<BookingInsert, "id" | "created_at" | "up
 };
 
 export function isAssessmentRequiredError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return message.includes("has not passed behavioural assessment");
+  return extractErrorMessage(error).includes("has not passed behavioural assessment");
+}
+
+const BOOKING_INSERT_OPTIONAL_COLUMNS = [
+  "booking_type",
+  "pickup_required",
+  "dropoff_required",
+] as const;
+
+async function insertBookingRow(payload: BookingInsert): Promise<Booking> {
+  let current: Record<string, unknown> = { ...payload };
+
+  for (let attempt = 0; attempt <= BOOKING_INSERT_OPTIONAL_COLUMNS.length; attempt++) {
+    const { data, error } = await supabase.from("bookings").insert(current).select().single();
+
+    if (!error) {
+      return data as Booking;
+    }
+
+    const removable = BOOKING_INSERT_OPTIONAL_COLUMNS.find(
+      (column) => isMissingPostgrestColumnError(error, column) && column in current,
+    );
+
+    if (removable) {
+      const { [removable]: _removed, ...rest } = current;
+      current = rest;
+      continue;
+    }
+
+    if (import.meta.env.DEV) {
+      console.error("[useCreateBooking] booking insert failed:", error);
+    }
+    throw error;
+  }
+
+  throw new Error("Could not insert booking");
 }
 
 export const queryKeys = {
@@ -404,25 +439,12 @@ export function useCreateBooking() {
       dog_size,
       ...bookingData
     }: CreateBookingPayload) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:entry',message:'create booking mutation started',data:{hasOwnerId:!!bookingData.owner_id,roomId:bookingData.room_id??null,bookingType:bookingData.booking_type??null,petCount:pet_ids.length,checkInDate:bookingData.check_in_date??null,checkOutDate:bookingData.check_out_date??null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const payload: BookingInsert = {
         ...withoutDogSizeColumn({ ...bookingData, dog_size }),
         booking_type: bookingData.booking_type ?? "boarding",
       };
-      const { data: booking, error: bookingError } = await supabase
-        .from("bookings")
-        .insert(payload)
-        .select()
-        .single();
 
-      if (bookingError) {
-        // #region agent log
-        fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:bookingInsertError',message:'booking insert failed',data:{code:bookingError.code??null,message:bookingError.message??'unknown',details:bookingError.details??null,hint:bookingError.hint??null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        throw bookingError;
-      }
+      const booking = await insertBookingRow(payload);
 
       if (pet_ids.length > 0) {
         const bookingPets: BookingPetInsert[] = pet_ids.map((pet_id) => ({
@@ -438,14 +460,15 @@ export function useCreateBooking() {
           .insert(bookingPets);
 
         if (petsError) {
-          // #region agent log
-          fetch('http://127.0.0.1:7457/ingest/81f7289a-c4d7-40b8-b59b-bfc104f84409',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53391a'},body:JSON.stringify({sessionId:'53391a',runId:'qa-baseline',hypothesisId:'H1',location:'src/hooks/useBookings.ts:useCreateBooking:bookingPetsInsertError',message:'booking pets insert failed',data:{bookingId:booking.id,petCount:bookingPets.length,code:petsError.code??null,message:petsError.message??'unknown',details:petsError.details??null},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
+          if (import.meta.env.DEV) {
+            console.error("[useCreateBooking] booking_pets insert failed:", petsError);
+          }
+          await supabase.from("bookings").delete().eq("id", booking.id);
           throw petsError;
         }
       }
 
-      return booking as Booking;
+      return booking;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });

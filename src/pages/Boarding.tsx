@@ -108,6 +108,7 @@ import {
 } from "@/lib/transportPricing";
 import { buildBoardingTags, tagToneClass } from "@/lib/operationsTags";
 import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErrors";
+import { extractErrorMessage } from "@/lib/errors";
 import { DEFAULT_DOG_SIZE, type DogSizeFormValue } from "@/lib/dogSizeForm";
 import {
   Check,
@@ -155,12 +156,11 @@ function showCreateBookingErrorToast(options: {
   }
 
   if (!isAssessmentRequiredError(err)) {
-    const genericMessage = err instanceof Error ? err.message : "Failed to create booking";
-    toast.error(genericMessage);
+    toast.error(extractErrorMessage(err, "Failed to create booking"));
     return;
   }
 
-  const detail = err instanceof Error ? err.message : "";
+  const detail = extractErrorMessage(err);
   toast.error(`${petName ?? "This pet"} hasn't completed a behavioural assessment yet.`, {
     description: detail,
     action: petId
@@ -1463,6 +1463,10 @@ export function DogBoardingCalendar({
     }
     if (form.pet_ids.length === 0) {
       toast.error("Select at least one pet for this stay");
+      return;
+    }
+    if (form.check_out_date <= form.check_in_date) {
+      toast.error("Check-out must be after check-in");
       return;
     }
     const catInSelection = form.pet_ids.some(
@@ -3169,6 +3173,10 @@ function CatBoardingCalendar({
     }
     if (form.pet_ids.length === 0) {
       toast.error("Select at least one cat for this stay");
+      return;
+    }
+    if (form.check_out_date <= form.check_in_date) {
+      toast.error("Check-out must be after check-in");
       return;
     }
     const nonCat = form.pet_ids.some(
