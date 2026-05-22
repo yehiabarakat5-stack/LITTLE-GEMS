@@ -1,9 +1,7 @@
 /**
  * RoomsAdmin — /settings/rooms
- *
- * Inline-editable table of all rooms. Each cell can be clicked to edit.
- * Text / number fields save on blur or Enter. Enum select fields save on
- * change. Active and Camera recording toggles save immediately.
+ * Queries only: display_name, color, room_number, max_pets, cam_number,
+ * camera_recording, is_active (+ computed status from today's bookings).
  */
 
 import {
@@ -13,12 +11,14 @@ import {
   useLayoutEffect,
   useCallback,
   useEffect,
-  KeyboardEvent,
+  type Dispatch,
+  type SetStateAction,
+  type KeyboardEvent,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
 import { useUpdateRoom, useCreateRoom, useAllRooms } from "@/hooks/useBookings";
-import { useRoomTypesQuery } from "@/hooks/useRoomTypes";
+import { roomDisplayCategory, type RoomsAdminRoom } from "@/lib/roomsApi";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -34,13 +34,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -52,113 +45,6 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { Plus, Pencil, Loader2, Search } from "lucide-react";
-import type { Database } from "@/integrations/supabase/types";
-
-type Room = Database["public"]["Tables"]["rooms"]["Row"];
-type RoomInsert = Database["public"]["Tables"]["rooms"]["Insert"];
-type RoomWing = Database["public"]["Enums"]["room_wing"];
-type RoomType = Database["public"]["Enums"]["room_type"];
-type CapacityType = Database["public"]["Enums"]["capacity_type"];
-
-// ── Display labels ────────────────────────────────────────────────────────────
-
-const WING_LABELS: Record<string, string> = {
-  oxford: "Oxford Street",
-  piccadilly: "Piccadilly",
-  park_lane: "Park Lane",
-  fleet: "Fleet Street",
-  back_kennels: "Back Kennels",
-  cattery: "Cat boarding (wing)",
-  grooming_upstairs: "Grooming Upstairs",
-  bond_rooms: "Bond Rooms",
-  dluxe: "Dluxe",
-  standard_room: "Standard Room",
-  bond_suite: "Bond Suite",
-  royal_annex: "Royal Annex",
-  royal_suite: "Royal Suite",
-  pall_mall: "Pall Mall",
-  little_gems: "Little Gems",
-  standard_suite: "Standard Suite",
-  grooming_room: "Grooming Room",
-  training_room: "Training Room",
-  deluxe_annex: "Deluxe Annex",
-  deluxe_suite: "Deluxe Suite",
-  lg_resting_nook: "LG Resting Nook",
-  lg_grooming_room: "LG Grooming Room",
-  furrari_lounge: "Furrari Lounge",
-  kitchen: "Kitchen",
-  import_placeholder: "Import placeholder (unknown kennel)",
-};
-
-const ROOM_TYPE_LABELS: Record<string, string> = {
-  presidential_super: "Presidential Super",
-  presidential_standard: "Presidential Standard",
-  presidential_single: "Presidential Single",
-  presidential_double: "Presidential Double",
-  royal_suite_double: "Royal Suite Double",
-  royal_suite_single: "Royal Suite Single",
-  double_royal: "Double Royal",
-  single_royal: "Single Royal",
-  family_room: "Family Room",
-  royal_annex: "Royal Annex",
-  cattery_super_presidential: "Cattery Super Presidential",
-  cattery_presidential: "Cattery Presidential",
-  cattery_deluxe: "Cattery Deluxe",
-  park_lane: "Park Lane",
-  pall_mall: "Pall Mall",
-  kennels: "Back Kennels",
-  deluxe: "Deluxe",
-  standard: "Standard",
-  standard_glass: "Standard Glass",
-  lg_deluxe: "LG Deluxe",
-  lg_royal: "LG Royal",
-  lg_standard: "LG Standard",
-  lg_presidential: "LG Presidential",
-  lg_presidential_double: "LG Presidential Double",
-  lg_royal_double: "LG Royal Double",
-  lg_standard_luxury: "LG Standard Luxury",
-  lg_resting_nook: "LG Resting Nook",
-  kitchen: "Kitchen",
-};
-
-const CAPACITY_LABELS: Record<CapacityType, string> = {
-  single: "Single",
-  twin: "Twin",
-  twin_plus: "Twin+",
-  multiple: "Multiple",
-};
-
-const WING_VALUES: RoomWing[] = [
-  "bond_rooms",
-  "dluxe",
-  "standard_room",
-  "oxford",
-  "piccadilly",
-  "park_lane",
-  "fleet",
-  "back_kennels",
-  "cattery",
-  "grooming_upstairs",
-];
-
-const ROOM_TYPE_VALUES: RoomType[] = [
-  "presidential_super",
-  "presidential_standard",
-  "royal_suite_double",
-  "royal_suite_single",
-  "double_royal",
-  "single_royal",
-  "family_room",
-  "royal_annex",
-  "park_lane",
-  "pall_mall",
-  "kennels",
-  "cattery_super_presidential",
-  "cattery_presidential",
-  "cattery_deluxe",
-];
-
-const CAPACITY_VALUES: CapacityType[] = ["single", "twin", "twin_plus", "multiple"];
 
 const MIN_MAX_PETS = 1;
 const MAX_MAX_PETS = 100;
@@ -177,6 +63,28 @@ const ROOM_LABEL_PRESET_COLORS = [
   "#FFFFFF",
 ] as const;
 
+type EditingCell = { id: string; field: string } | null;
+
+type RoomForm = {
+  display_name: string;
+  room_number: string;
+  color: string;
+  max_pets: number;
+  cam_number: string;
+  camera_recording: boolean;
+  is_active: boolean;
+};
+
+const EMPTY_FORM: RoomForm = {
+  display_name: "",
+  room_number: "",
+  color: "",
+  max_pets: MIN_MAX_PETS,
+  cam_number: "",
+  camera_recording: false,
+  is_active: true,
+};
+
 function normalizeHexColor(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -189,17 +97,63 @@ function clampMaxPets(n: number): number {
   return Math.min(MAX_MAX_PETS, Math.max(MIN_MAX_PETS, Math.round(n)));
 }
 
-/** Display / edit seed for max_pets — integers only, clamped (fixes legacy decimals in DB). */
 function formatMaxPetsForUi(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "";
   const n = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? String(clampMaxPets(n)) : "";
 }
 
-/**
- * Dedicated editor for max_pets so blur/save does not share global editValue/ref with other cells
- * (which caused lost updates). Persists to DB on blur via onSave.
- */
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatRoomMutationError(err: unknown): string {
+  if (err == null) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim()) return m;
+  }
+  return String(err);
+}
+
+function roomsSchemaMigrationHint(message: string): string | null {
+  const m = message.toLowerCase();
+  if (
+    m.includes("row-level security") ||
+    m.includes("permission denied") ||
+    m.includes("42501")
+  ) {
+    return "Staff cannot read rooms due to RLS. Run sql/rooms-authenticated-rls.sql in the Supabase SQL Editor, then refresh.";
+  }
+  if (m.includes("color") || m.includes("label_color")) {
+    return "The database is missing a room color column. Add rooms.color or rooms.label_color in Supabase, then refresh.";
+  }
+  if (m.includes("camera_recording")) {
+    return "Apply supabase/migrations/20260510120000_add_rooms_camera_recording.sql, then refresh.";
+  }
+  return null;
+}
+
+function toastRoomSaveFailed(err: unknown) {
+  const msg = formatRoomMutationError(err);
+  const hint = roomsSchemaMigrationHint(msg);
+  toast.error(hint ?? `Save failed: ${msg}`, hint ? { duration: 12_000 } : undefined);
+}
+
+function roomToForm(room: RoomsAdminRoom): RoomForm {
+  return {
+    display_name: room.display_name,
+    room_number: room.room_number,
+    color: normalizeHexColor(room.color) ?? "",
+    max_pets: clampMaxPets(room.max_pets),
+    cam_number: room.cam_number ?? "",
+    camera_recording: room.camera_recording ?? false,
+    is_active: room.is_active,
+  };
+}
+
 function MaxPetsCell({
   room,
   isEditing,
@@ -207,7 +161,7 @@ function MaxPetsCell({
   onClose,
   onSave,
 }: {
-  room: Room;
+  room: RoomsAdminRoom;
   isEditing: boolean;
   onOpen: () => void;
   onClose: () => void;
@@ -234,15 +188,12 @@ function MaxPetsCell({
       skipBlurCommitRef.current = false;
       return;
     }
-    const raw = draftRef.current;
-    const digits = raw.replace(/\D/g, "");
+    const digits = draftRef.current.replace(/\D/g, "");
     const n = digits === "" ? NaN : parseInt(digits, 10);
     const value = clampMaxPets(Number.isNaN(n) ? MIN_MAX_PETS : n);
     const prevMax = clampMaxPets(Number(room.max_pets));
     onClose();
-    if (value !== prevMax) {
-      onSave(room.id, value);
-    }
+    if (value !== prevMax) onSave(room.id, value);
   };
 
   if (isEditing) {
@@ -286,7 +237,7 @@ function MaxPetsCell({
   return (
     <span
       className="block cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors min-w-[60px] text-right tabular-nums"
-      onClick={() => onOpen()}
+      onClick={onOpen}
       title="Click to edit"
     >
       {displayVal ?? <span className="text-muted-foreground">—</span>}
@@ -294,76 +245,14 @@ function MaxPetsCell({
   );
 }
 
-// ── Editable cell helpers ─────────────────────────────────────────────────────
-
-type EditingCell = { id: string; field: string } | null;
-
-/** Supabase / react-query often pass plain objects, not Error instances. */
-function formatRoomMutationError(err: unknown): string {
-  if (err == null) return "Unknown error";
-  if (typeof err === "string") return err;
-  if (err instanceof Error && typeof err.message === "string" && err.message.trim()) {
-    return err.message;
-  }
-  if (typeof err === "object") {
-    const o = err as Record<string, unknown>;
-    const msg = o.message;
-    if (typeof msg === "string" && msg.trim()) return msg;
-    if (typeof msg === "object" && msg !== null) {
-      try {
-        return JSON.stringify(msg);
-      } catch {
-        /* fall through */
-      }
-    }
-    if (typeof o.error === "string" && o.error.trim()) return o.error;
-    if (typeof o.details === "string" && o.details.trim()) return o.details;
-    if (typeof o.hint === "string" && o.hint.trim()) return o.hint;
-    try {
-      return JSON.stringify(o);
-    } catch {
-      return "Unknown error";
-    }
-  }
-  return String(err);
-}
-
-function roomsSchemaMigrationHint(message: string): string | null {
-  const m = message.toLowerCase();
-  if (
-    m.includes("row-level security") ||
-    m.includes("permission denied") ||
-    m.includes("42501")
-  ) {
-    return "Staff cannot read rooms due to RLS. Run sql/rooms-authenticated-rls.sql (or migration 20260522130000_rooms_authenticated_rls.sql) in the Supabase SQL Editor, then refresh.";
-  }
-  if (m.includes("label_color")) {
-    return "The database is missing column rooms.label_color. Apply sql/add-rooms-label-color.sql in the Supabase SQL Editor, then refresh the app.";
-  }
-  if (
-    m.includes("camera_recording") ||
-    (m.includes("schema cache") && m.includes("rooms")) ||
-    (m.includes("could not find") && m.includes("rooms"))
-  ) {
-    return "The database is missing column rooms.camera_recording. Apply the migration: supabase/migrations/20260510120000_add_rooms_camera_recording.sql (Supabase CLI or SQL Editor), then refresh the app.";
-  }
-  return null;
-}
-
-function toastRoomSaveFailed(err: unknown) {
-  const msg = formatRoomMutationError(err);
-  const hint = roomsSchemaMigrationHint(msg);
-  toast.error(hint ?? `Save failed: ${msg}`, hint ? { duration: 12_000 } : undefined);
-}
-
 function RoomColorCell({
   room,
   onSave,
 }: {
-  room: Room;
-  onSave: (roomId: string, labelColor: string | null) => void;
+  room: RoomsAdminRoom;
+  onSave: (roomId: string, color: string | null) => void;
 }) {
-  const color = normalizeHexColor(room.label_color);
+  const color = normalizeHexColor(room.color);
 
   return (
     <Popover>
@@ -371,35 +260,30 @@ function RoomColorCell({
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/60 transition-colors"
-          aria-label={`Set color label for ${room.display_name}`}
+          aria-label={`Set color for ${room.display_name}`}
         >
           <span
             className="h-5 w-5 shrink-0 rounded-full border border-border shadow-sm"
             style={{ backgroundColor: color ?? "transparent" }}
           />
-          <span className="text-[10px] text-muted-foreground tabular-nums">
-            {color ?? "None"}
-          </span>
+          <span className="text-[10px] text-muted-foreground tabular-nums">{color ?? "None"}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-56 p-3" align="start">
-        <p className="mb-2 text-xs font-medium text-muted-foreground">Room color label</p>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Room color</p>
         <div className="grid grid-cols-5 gap-2">
-          {ROOM_LABEL_PRESET_COLORS.map((preset) => {
-            const selected = color === preset;
-            return (
-              <button
-                key={preset}
-                type="button"
-                title={preset}
-                className={`h-7 w-7 rounded-full border transition-transform hover:scale-105 ${
-                  selected ? "ring-2 ring-ring ring-offset-2" : "border-border"
-                }`}
-                style={{ backgroundColor: preset }}
-                onClick={() => onSave(room.id, preset)}
-              />
-            );
-          })}
+          {ROOM_LABEL_PRESET_COLORS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              title={preset}
+              className={`h-7 w-7 rounded-full border transition-transform hover:scale-105 ${
+                color === preset ? "ring-2 ring-ring ring-offset-2" : "border-border"
+              }`}
+              style={{ backgroundColor: preset }}
+              onClick={() => onSave(room.id, preset)}
+            />
+          ))}
         </div>
         <div className="mt-3 flex items-center gap-2">
           <Label htmlFor={`room-color-${room.id}`} className="text-xs shrink-0">
@@ -427,258 +311,175 @@ function RoomColorCell({
   );
 }
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-const emptyInsertDefaults = (): Omit<RoomInsert, "id" | "created_at"> => ({
-  display_name: "",
-  room_number: "",
-  wing: "little_gems" as RoomWing,
-  room_type: "deluxe" as RoomType,
-  capacity_type: "single",
-  max_pets: 1,
-  is_active: true,
-  camera_recording: false,
-});
-
-type RoomEditForm = {
-  display_name: string;
-  room_number: string;
-  wing: RoomWing;
-  room_type: string;
-  capacity_type: CapacityType;
-  max_pets: number;
-};
-
-const EMPTY_EDIT_FORM: RoomEditForm = {
-  display_name: "",
-  room_number: "",
-  wing: "little_gems" as RoomWing,
-  room_type: "deluxe" as RoomType,
-  capacity_type: "single",
-  max_pets: MIN_MAX_PETS,
-};
-
-function roomToEditForm(room: Room): RoomEditForm {
-  return {
-    display_name: room.display_name,
-    room_number: room.room_number,
-    wing: room.wing,
-    room_type: room.room_type,
-    capacity_type: room.capacity_type,
-    max_pets: clampMaxPets(room.max_pets ?? MIN_MAX_PETS),
-  };
-}
-
 const RoomsAdminPage = () => {
   const { data: allRooms, isLoading, isFetching, isError, error, refetch } = useAllRooms();
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
-  const roomTypesQ = useRoomTypesQuery();
-  const { roomTypeValues, roomTypeLabels } = useMemo(() => {
-    const labels: Record<string, string> = { ...ROOM_TYPE_LABELS };
-    const slugs = new Set<string>(ROOM_TYPE_VALUES);
-
-    for (const rt of roomTypesQ.data ?? []) {
-      labels[rt.slug] = rt.label;
-      slugs.add(rt.slug);
-    }
-
-    for (const room of allRooms ?? []) {
-      if (room.room_type && !slugs.has(room.room_type)) {
-        slugs.add(room.room_type);
-        labels[room.room_type] =
-          labels[room.room_type] ?? room.room_type.replace(/_/g, " ");
-      }
-    }
-
-    const values = Array.from(slugs).sort((a, b) =>
-      (labels[a] ?? a).localeCompare(labels[b] ?? b),
-    );
-
-    return { roomTypeValues: values, roomTypeLabels: labels };
-  }, [roomTypesQ.data, allRooms]);
 
   const rooms = allRooms ?? [];
   const roomsLoading = isLoading || (isFetching && rooms.length === 0);
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState("__all__");
-  const [typeFilterSearch, setTypeFilterSearch] = useState("");
-  const [typeFilterOpen, setTypeFilterOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("__all__");
+  const [categoryFilterSearch, setCategoryFilterSearch] = useState("");
+  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(ROOMS_PAGE_SIZE);
 
-  const roomTypeFilterOptions = useMemo(() => {
-    const opts = [{ value: "__all__", label: "All room types" }];
-    for (const slug of roomTypeValues) {
-      opts.push({ value: slug, label: roomTypeLabels[slug] ?? slug });
+  const categoryOptions = useMemo(() => {
+    const cats = new Set<string>();
+    for (const room of rooms) {
+      const cat = roomDisplayCategory(room.display_name);
+      if (cat) cats.add(cat);
     }
-    return opts;
-  }, [roomTypeValues, roomTypeLabels]);
+    const sorted = Array.from(cats).sort((a, b) => a.localeCompare(b));
+    return [{ value: "__all__", label: "All room types" }, ...sorted.map((c) => ({ value: c, label: c }))];
+  }, [rooms]);
 
-  const filteredRoomTypeOptions = useMemo(() => {
-    const q = typeFilterSearch.trim().toLowerCase();
-    if (!q) return roomTypeFilterOptions;
-    return roomTypeFilterOptions.filter((o) => o.label.toLowerCase().includes(q));
-  }, [roomTypeFilterOptions, typeFilterSearch]);
+  const filteredCategoryOptions = useMemo(() => {
+    const q = categoryFilterSearch.trim().toLowerCase();
+    if (!q) return categoryOptions;
+    return categoryOptions.filter((o) => o.label.toLowerCase().includes(q));
+  }, [categoryOptions, categoryFilterSearch]);
+
+  const selectedCategoryLabel =
+    categoryOptions.find((o) => o.value === categoryFilter)?.label ?? "All room types";
 
   const { data: occupiedRoomIds } = useQuery({
     queryKey: ["rooms", "occupied-today"],
     queryFn: async () => {
       const today = todayISO();
-      const { data, error } = await supabase
+      const { data, error: qErr } = await supabase
         .from("bookings")
         .select("room_id")
         .lte("check_in_date", today)
         .gte("check_out_date", today)
         .in("status", ["confirmed", "checked_in"]);
-      if (error) throw error;
+      if (qErr) throw qErr;
       return new Set((data ?? []).map((b) => b.room_id));
     },
     refetchInterval: 60_000,
   });
 
   const filteredRooms = useMemo(() => {
-    if (!rooms) return undefined;
     let result = rooms;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter((r) => {
         const name = r.display_name.toLowerCase();
-        const wing = (WING_LABELS[r.wing as RoomWing] ?? r.wing).toLowerCase();
-        const type = (roomTypeLabels[r.room_type] ?? r.room_type).toLowerCase();
         const num = r.room_number.toLowerCase();
-        return name.includes(q) || wing.includes(q) || type.includes(q) || num.includes(q);
+        const cam = (r.cam_number ?? "").toLowerCase();
+        return name.includes(q) || num.includes(q) || cam.includes(q);
       });
     }
-    if (typeFilter !== "__all__") {
-      result = result.filter((r) => r.room_type === typeFilter);
+    if (categoryFilter !== "__all__") {
+      result = result.filter((r) => roomDisplayCategory(r.display_name) === categoryFilter);
     }
     return result;
-  }, [rooms, searchQuery, typeFilter, roomTypeLabels]);
+  }, [rooms, searchQuery, categoryFilter]);
 
   const visibleRooms = useMemo(
-    () => (filteredRooms ?? []).slice(0, visibleCount),
+    () => filteredRooms.slice(0, visibleCount),
     [filteredRooms, visibleCount],
   );
 
-  const filteredRoomCount = filteredRooms?.length ?? 0;
+  const filteredRoomCount = filteredRooms.length;
   const hasMoreRooms = filteredRoomCount > visibleCount;
 
   useEffect(() => {
     setVisibleCount(ROOMS_PAGE_SIZE);
-  }, [searchQuery, typeFilter]);
-
-  const loadMore = useCallback(() => {
-    setVisibleCount((c) => c + ROOMS_PAGE_SIZE);
-  }, []);
+  }, [searchQuery, categoryFilter]);
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
-  /**
-   * Must mirror the input on every onChange. On blur, `e.currentTarget.value` can still reflect
-   * the pre-commit DOM when the last keystroke and blur happen in the same frame (controlled input).
-   */
   const latestEditDraftRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [addOpen, setAddOpen] = useState(false);
-  const [newRoom, setNewRoom] = useState(emptyInsertDefaults);
-
-  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
-  const [editForm, setEditForm] = useState<RoomEditForm>(EMPTY_EDIT_FORM);
+  const [newRoom, setNewRoom] = useState<RoomForm>(EMPTY_FORM);
+  const [editingRoom, setEditingRoom] = useState<RoomsAdminRoom | null>(null);
+  const [editForm, setEditForm] = useState<RoomForm>(EMPTY_FORM);
 
   const isEditing = useCallback(
-    (id: string, field: string) =>
-      editingCell?.id === id && editingCell?.field === field,
+    (id: string, field: string) => editingCell?.id === id && editingCell?.field === field,
     [editingCell],
   );
 
-  const startEdit = useCallback((room: Room, field: keyof Room, currentVal: string) => {
-    setEditingCell({ id: room.id, field: field as string });
+  const startEdit = useCallback((room: RoomsAdminRoom, field: string, currentVal: string) => {
+    setEditingCell({ id: room.id, field });
     setEditValue(currentVal);
     latestEditDraftRef.current = currentVal;
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
-  const commitEdit = useCallback((id: string, field: string, raw: string, previous: Room) => {
-    setEditingCell(null);
-
-    let value: string | number | boolean | null = raw.trim() === "" ? null : raw.trim();
-
-    if (field === "nightly_rate") {
-      const normalized = raw.trim().replace(/,/g, "");
-      const n = parseFloat(normalized);
-      value = Number.isNaN(n) ? null : Math.max(0, n);
-      const prev = previous.nightly_rate;
-      if (value === null && (prev === null || prev === undefined)) return;
-      if (
-        typeof value === "number" &&
-        prev !== null &&
-        prev !== undefined &&
-        Math.abs(value - prev) < 1e-9
-      ) {
+  const commitEdit = useCallback(
+    (id: string, field: string, raw: string) => {
+      setEditingCell(null);
+      const trimmed = raw.trim();
+      if (field === "display_name" || field === "room_number") {
+        if (!trimmed) return;
+        updateRoom.mutate({ id, [field]: trimmed }, { onError: toastRoomSaveFailed });
         return;
       }
-    }
-
-    updateRoom.mutate(
-      { id, [field]: value },
-      { onError: toastRoomSaveFailed },
-    );
-  }, [updateRoom]);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>, id: string, field: string) => {
-      if (e.key === "Enter") {
-        e.currentTarget.blur();
+      if (field === "cam_number") {
+        updateRoom.mutate(
+          { id, cam_number: trimmed === "" ? null : trimmed },
+          { onError: toastRoomSaveFailed },
+        );
       }
-      if (e.key === "Escape") {
-        setEditingCell(null);
-      }
-    },
-    [],
-  );
-
-  const saveEnum = useCallback(
-    <T extends string>(id: string, field: string, value: T) => {
-      updateRoom.mutate(
-        { id, [field]: value },
-        { onError: toastRoomSaveFailed },
-      );
     },
     [updateRoom],
   );
 
-  const toggleActive = useCallback((room: Room) => {
-    updateRoom.mutate(
-      { id: room.id, is_active: !room.is_active },
-      {
-        onSuccess: () =>
-          toast.success(
-            !room.is_active
-              ? `${room.display_name} is now active`
-              : `${room.display_name} deactivated`,
-          ),
-        onError: toastRoomSaveFailed,
-      },
-    );
-  }, [updateRoom]);
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") setEditingCell(null);
+  }, []);
+
+  const toggleActive = useCallback(
+    (room: RoomsAdminRoom) => {
+      updateRoom.mutate(
+        { id: room.id, is_active: !room.is_active },
+        {
+          onSuccess: () =>
+            toast.success(
+              !room.is_active ? `${room.display_name} is now active` : `${room.display_name} deactivated`,
+            ),
+          onError: toastRoomSaveFailed,
+        },
+      );
+    },
+    [updateRoom],
+  );
 
   const toggleCameraRecording = useCallback(
-    (room: Room) => {
-      const next = !(room.camera_recording ?? false);
+    (room: RoomsAdminRoom) => {
       updateRoom.mutate(
-        { id: room.id, camera_recording: next },
+        { id: room.id, camera_recording: !(room.camera_recording ?? false) },
         { onError: toastRoomSaveFailed },
       );
     },
     [updateRoom],
   );
 
-  const openEditRoom = useCallback((room: Room) => {
+  const saveMaxPets = useCallback(
+    (roomId: string, max_pets: number) => {
+      updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed });
+    },
+    [updateRoom],
+  );
+
+  const saveRoomColor = useCallback(
+    (roomId: string, color: string | null) => {
+      updateRoom.mutate(
+        { id: roomId, color: normalizeHexColor(color) },
+        { onError: toastRoomSaveFailed },
+      );
+    },
+    [updateRoom],
+  );
+
+  const openEditRoom = useCallback((room: RoomsAdminRoom) => {
     setEditingRoom(room);
-    setEditForm(roomToEditForm(room));
+    setEditForm(roomToForm(room));
   }, []);
 
   const submitEditRoom = useCallback(() => {
@@ -686,7 +487,7 @@ const RoomsAdminPage = () => {
     const name = editForm.display_name.trim();
     const num = editForm.room_number.trim();
     if (!name || !num) {
-      toast.error("Display name and room number are required.");
+      toast.error("Room name and room number are required.");
       return;
     }
     updateRoom.mutate(
@@ -694,16 +495,17 @@ const RoomsAdminPage = () => {
         id: editingRoom.id,
         display_name: name,
         room_number: num,
-        wing: editForm.wing,
-        room_type: editForm.room_type,
-        capacity_type: editForm.capacity_type,
+        color: normalizeHexColor(editForm.color),
         max_pets: clampMaxPets(editForm.max_pets),
+        cam_number: editForm.cam_number.trim() === "" ? null : editForm.cam_number.trim(),
+        camera_recording: editForm.camera_recording,
+        is_active: editForm.is_active,
       },
       {
         onSuccess: () => {
           toast.success("Room updated");
           setEditingRoom(null);
-          setEditForm(EMPTY_EDIT_FORM);
+          setEditForm(EMPTY_FORM);
         },
         onError: toastRoomSaveFailed,
       },
@@ -711,23 +513,27 @@ const RoomsAdminPage = () => {
   }, [editingRoom, editForm, updateRoom]);
 
   const submitNewRoom = useCallback(() => {
-    const name = newRoom.display_name?.trim();
-    const num = newRoom.room_number?.trim();
+    const name = newRoom.display_name.trim();
+    const num = newRoom.room_number.trim();
     if (!name || !num) {
-      toast.error("Display name and room number are required.");
+      toast.error("Room name and room number are required.");
       return;
     }
     createRoom.mutate(
       {
-        ...newRoom,
         display_name: name,
         room_number: num,
+        color: normalizeHexColor(newRoom.color),
+        max_pets: clampMaxPets(newRoom.max_pets),
+        cam_number: newRoom.cam_number.trim() === "" ? null : newRoom.cam_number.trim(),
+        camera_recording: newRoom.camera_recording,
+        is_active: newRoom.is_active,
       },
       {
         onSuccess: () => {
           toast.success("Room created");
           setAddOpen(false);
-          setNewRoom(emptyInsertDefaults());
+          setNewRoom(EMPTY_FORM);
         },
         onError: (err) => {
           const msg = formatRoomMutationError(err);
@@ -738,64 +544,43 @@ const RoomsAdminPage = () => {
     );
   }, [newRoom, createRoom]);
 
-  const saveMaxPets = useCallback(
-    (roomId: string, max_pets: number) => {
-      updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed });
-    },
-    [updateRoom],
-  );
-
-  const saveRoomColor = useCallback(
-    (roomId: string, label_color: string | null) => {
-      updateRoom.mutate(
-        { id: roomId, label_color: normalizeHexColor(label_color) },
-        { onError: toastRoomSaveFailed },
-      );
-    },
-    [updateRoom],
-  );
-
   const TextCell = ({
     room,
     field,
     value,
-    type = "text",
     placeholder = "—",
-    className,
   }: {
-    room: Room;
-    field: keyof Room;
-    value: string | number | null;
-    type?: "text" | "number";
+    room: RoomsAdminRoom;
+    field: "display_name" | "room_number" | "cam_number";
+    value: string | null;
     placeholder?: string;
-    className?: string;
   }) => {
-    const displayVal = value != null && value !== "" ? String(value) : null;
+    const displayVal = value != null && value !== "" ? value : null;
 
-    if (isEditing(room.id, field as string)) {
+    if (isEditing(room.id, field)) {
       return (
         <input
           ref={inputRef}
-          type={type}
-          className={`w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring ${className ?? ""}`}
+          type="text"
+          className="w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           value={editValue}
           autoComplete="off"
           onChange={(e) => {
-            const v = e.target.value;
-            latestEditDraftRef.current = v;
-            setEditValue(v);
+            latestEditDraftRef.current = e.target.value;
+            setEditValue(e.target.value);
           }}
-          onBlur={() => commitEdit(room.id, field as string, latestEditDraftRef.current, room)}
-          onKeyDown={(e) => handleKeyDown(e, room.id, field as string)}
-          step={type === "number" ? "0.01" : undefined}
-          min={type === "number" ? "0" : undefined}
+          onBlur={() => commitEdit(room.id, field, latestEditDraftRef.current)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            handleKeyDown(e);
+          }}
         />
       );
     }
 
     return (
       <span
-        className={`block cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors min-w-[60px] ${className ?? ""}`}
+        className="block cursor-pointer rounded px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors min-w-[60px]"
         onClick={() => startEdit(room, field, displayVal ?? "")}
         title="Click to edit"
       >
@@ -803,36 +588,6 @@ const RoomsAdminPage = () => {
       </span>
     );
   };
-
-  const EnumCell = <T extends string>({
-    room,
-    field,
-    value,
-    options,
-    labels,
-  }: {
-    room: Room;
-    field: string;
-    value: T;
-    options: T[];
-    labels: Record<T, string>;
-  }) => (
-    <Select value={value} onValueChange={(v) => saveEnum<T>(room.id, field, v as T)}>
-      <SelectTrigger className="h-8 text-xs border-0 shadow-none px-1 focus:ring-1 min-w-[130px]">
-        <SelectValue>{labels[value]}</SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((opt) => (
-          <SelectItem key={opt} value={opt} className="text-xs">
-            {labels[opt]}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
-  const selectedTypeFilterLabel =
-    roomTypeFilterOptions.find((o) => o.value === typeFilter)?.label ?? "All room types";
 
   return (
     <>
@@ -842,8 +597,7 @@ const RoomsAdminPage = () => {
           <div>
             <h2 className="text-xl font-semibold">Room Management</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Click any cell to edit inline. Status shows occupied rooms for today. Use the pencil
-              icon for full room details.
+              Click any cell to edit inline. Status reflects today&apos;s bookings.
               {rooms.length > 0 && (
                 <span className="ml-1 font-medium text-foreground">
                   ({rooms.length} room{rooms.length === 1 ? "" : "s"} loaded)
@@ -880,10 +634,9 @@ const RoomsAdminPage = () => {
           <div className="space-y-3">
             <p className="text-muted-foreground">No rooms found.</p>
             <p className="text-sm text-muted-foreground max-w-xl">
-              If rows exist in the Supabase SQL editor but not here, the app user may be blocked by
-              row-level security. Run{" "}
+              If rows exist in the Supabase SQL editor but not here, run{" "}
               <code className="text-xs bg-muted px-1 py-0.5 rounded">sql/rooms-authenticated-rls.sql</code>{" "}
-              in the SQL editor, then refresh this page.
+              then refresh.
             </p>
             <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>
               Retry
@@ -891,199 +644,191 @@ const RoomsAdminPage = () => {
           </div>
         ) : (
           <>
-          <div className="mb-4 flex flex-wrap items-center gap-3">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search room name..."
-              className="w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <Popover open={typeFilterOpen} onOpenChange={setTypeFilterOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="h-9 min-w-[200px] justify-between font-normal">
-                  {selectedTypeFilterLabel}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[260px] p-2" align="start">
-                <div className="relative mb-2">
-                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    value={typeFilterSearch}
-                    onChange={(e) => setTypeFilterSearch(e.target.value)}
-                    placeholder="Search room types..."
-                    className="h-8 pl-8 text-sm"
-                  />
-                </div>
-                <div className="max-h-56 overflow-y-auto space-y-0.5">
-                  {filteredRoomTypeOptions.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${
-                        typeFilter === opt.value ? "bg-muted font-medium" : ""
-                      }`}
-                      onClick={() => {
-                        setTypeFilter(opt.value);
-                        setTypeFilterOpen(false);
-                        setTypeFilterSearch("");
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                  {filteredRoomTypeOptions.length === 0 ? (
-                    <p className="px-2 py-2 text-xs text-muted-foreground">No matching types</p>
-                  ) : null}
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-          <div className="rounded-lg border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead className="min-w-[180px]">Room name</TableHead>
-                  <TableHead className="min-w-[88px] w-[88px] text-center">Color</TableHead>
-                  <TableHead className="min-w-[88px] w-[88px] text-center">Room number</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Max pets</TableHead>
-                  <TableHead className="min-w-[100px]">Camera no</TableHead>
-                  <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
-                  <TableHead className="text-center min-w-[100px]">Status</TableHead>
-                  <TableHead className="text-center min-w-[80px]">Active</TableHead>
-                  <TableHead className="w-[88px]" />
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {visibleRooms.map((room) => {
-                  const rowColor = normalizeHexColor(room.label_color);
-                  return (
-                  <TableRow
-                    key={room.id}
-                    className={room.is_active ? "" : "opacity-50 bg-muted/20"}
-                    style={
-                      rowColor
-                        ? { boxShadow: `inset 4px 0 0 0 ${rowColor}` }
-                        : undefined
-                    }
-                  >
-                    <TableCell>
-                      <span className="font-medium flex items-center gap-2 min-w-0">
-                        {rowColor ? (
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full border border-border/60"
-                            style={{ backgroundColor: rowColor }}
-                            title={rowColor}
-                          />
-                        ) : null}
-                        <TextCell
-                          room={room}
-                          field="display_name"
-                          value={room.display_name}
-                        />
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <RoomColorCell room={room} onSave={saveRoomColor} />
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <span className="inline-block min-w-[2.5rem] font-mono text-sm tabular-nums">
-                        <TextCell room={room} field="room_number" value={room.room_number} />
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="text-right">
-                      <MaxPetsCell
-                        room={room}
-                        isEditing={isEditing(room.id, "max_pets")}
-                        onOpen={() => setEditingCell({ id: room.id, field: "max_pets" })}
-                        onClose={() => setEditingCell(null)}
-                        onSave={saveMaxPets}
-                      />
-                    </TableCell>
-
-
-                    <TableCell>
-                      <TextCell room={room} field="cam_number" value={room.cam_number} />
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <div className="flex flex-col items-center gap-1 sm:flex-row sm:justify-center sm:gap-2">
-                        <Switch
-                          checked={room.camera_recording ?? false}
-                          onCheckedChange={() => toggleCameraRecording(room)}
-                          aria-label={`Camera recording for ${room.display_name}`}
-                        />
-                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                          {room.camera_recording ? "Yes" : "No"}
-                        </span>
-                      </div>
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      {occupiedRoomIds?.has(room.id) ? (
-                        <Badge className="bg-green-100 text-green-800 border-green-300 hover:bg-green-100 text-[10px] px-1.5">
-                          Occupied
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-[10px] px-1.5 bg-muted text-muted-foreground border-muted-foreground/30">
-                          Available
-                        </Badge>
-                      )}
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <Switch
-                          checked={room.is_active}
-                          onCheckedChange={() => toggleActive(room)}
-                          aria-label={`Toggle ${room.display_name} active`}
-                        />
-                        {!room.is_active && (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] px-1.5 bg-muted text-muted-foreground border-muted-foreground/30"
-                          >
-                            Off
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-
-                    <TableCell className="text-center">
-                      <Button
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search room name, number, camera no..."
+                className="w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <Popover open={categoryFilterOpen} onOpenChange={setCategoryFilterOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-9 min-w-[200px] justify-between font-normal">
+                    {selectedCategoryLabel}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[260px] p-2" align="start">
+                  <div className="relative mb-2">
+                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      value={categoryFilterSearch}
+                      onChange={(e) => setCategoryFilterSearch(e.target.value)}
+                      placeholder="Search room types..."
+                      className="h-8 pl-8 text-sm"
+                    />
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-0.5">
+                    {filteredCategoryOptions.map((opt) => (
+                      <button
+                        key={opt.value}
                         type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        aria-label={`Edit ${room.display_name}`}
-                        onClick={() => openEditRoom(room)}
+                        className={`w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                          categoryFilter === opt.value ? "bg-muted font-medium" : ""
+                        }`}
+                        onClick={() => {
+                          setCategoryFilter(opt.value);
+                          setCategoryFilterOpen(false);
+                          setCategoryFilterSearch("");
+                        }}
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-          {filteredRoomCount > 0 && (
-            <div className="mt-4 flex flex-col items-center gap-2">
-              <p className="text-sm text-muted-foreground">
-                Showing {visibleRooms.length} of {filteredRoomCount} room
-                {filteredRoomCount === 1 ? "" : "s"}
-              </p>
-              {hasMoreRooms && (
-                <Button type="button" variant="outline" onClick={loadMore}>
-                  Load more
-                </Button>
-              )}
+                        {opt.label}
+                      </button>
+                    ))}
+                    {filteredCategoryOptions.length === 0 ? (
+                      <p className="px-2 py-2 text-xs text-muted-foreground">No matching types</p>
+                    ) : null}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
-          )}
+
+            <div className="rounded-lg border overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead className="min-w-[180px]">Room name</TableHead>
+                    <TableHead className="min-w-[88px] w-[88px] text-center">Color</TableHead>
+                    <TableHead className="min-w-[88px] w-[88px] text-center">Room number</TableHead>
+                    <TableHead className="text-right min-w-[80px]">Max pets</TableHead>
+                    <TableHead className="min-w-[100px]">Camera no</TableHead>
+                    <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
+                    <TableHead className="text-center min-w-[100px]">Status</TableHead>
+                    <TableHead className="text-center min-w-[80px]">Active</TableHead>
+                    <TableHead className="w-[88px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleRooms.map((room) => {
+                    const rowColor = normalizeHexColor(room.color);
+                    return (
+                      <TableRow
+                        key={room.id}
+                        className={room.is_active ? "" : "opacity-50 bg-muted/20"}
+                        style={
+                          rowColor ? { boxShadow: `inset 4px 0 0 0 ${rowColor}` } : undefined
+                        }
+                      >
+                        <TableCell>
+                          <span className="font-medium flex items-center gap-2 min-w-0">
+                            {rowColor ? (
+                              <span
+                                className="h-2.5 w-2.5 shrink-0 rounded-full border border-border/60"
+                                style={{ backgroundColor: rowColor }}
+                              />
+                            ) : null}
+                            <TextCell room={room} field="display_name" value={room.display_name} />
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <RoomColorCell room={room} onSave={saveRoomColor} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="inline-block min-w-[2.5rem] font-mono text-sm tabular-nums">
+                            <TextCell room={room} field="room_number" value={room.room_number} />
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <MaxPetsCell
+                            room={room}
+                            isEditing={isEditing(room.id, "max_pets")}
+                            onOpen={() => setEditingCell({ id: room.id, field: "max_pets" })}
+                            onClose={() => setEditingCell(null)}
+                            onSave={saveMaxPets}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextCell room={room} field="cam_number" value={room.cam_number} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex flex-col items-center gap-1 sm:flex-row sm:justify-center sm:gap-2">
+                            <Switch
+                              checked={room.camera_recording ?? false}
+                              onCheckedChange={() => toggleCameraRecording(room)}
+                              aria-label={`Camera recording for ${room.display_name}`}
+                            />
+                            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                              {room.camera_recording ? "Yes" : "No"}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {occupiedRoomIds?.has(room.id) ? (
+                            <Badge className="bg-green-100 text-green-800 border-green-300 hover:bg-green-100 text-[10px] px-1.5">
+                              Occupied
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 bg-muted text-muted-foreground border-muted-foreground/30"
+                            >
+                              Available
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <Switch
+                              checked={room.is_active}
+                              onCheckedChange={() => toggleActive(room)}
+                              aria-label={`Toggle ${room.display_name} active`}
+                            />
+                            {!room.is_active && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 bg-muted text-muted-foreground border-muted-foreground/30"
+                              >
+                                Off
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Edit ${room.display_name}`}
+                            onClick={() => openEditRoom(room)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            {filteredRoomCount > 0 && (
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <p className="text-sm text-muted-foreground">
+                  Showing {visibleRooms.length} of {filteredRoomCount} room
+                  {filteredRoomCount === 1 ? "" : "s"}
+                </p>
+                {hasMoreRooms && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setVisibleCount((c) => c + ROOMS_PAGE_SIZE)}
+                  >
+                    Load more
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -1092,7 +837,7 @@ const RoomsAdminPage = () => {
           onOpenChange={(open) => {
             if (!open) {
               setEditingRoom(null);
-              setEditForm(EMPTY_EDIT_FORM);
+              setEditForm(EMPTY_FORM);
             }
           }}
         >
@@ -1100,111 +845,20 @@ const RoomsAdminPage = () => {
             <DialogHeader>
               <DialogTitle>Edit room</DialogTitle>
             </DialogHeader>
-            <div className="grid gap-4 py-2">
-              <div className="grid gap-2">
-                <Label htmlFor="er-name">Display name</Label>
-                <Input
-                  id="er-name"
-                  value={editForm.display_name}
-                  onChange={(e) => setEditForm((f) => ({ ...f, display_name: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="er-num">Room number</Label>
-                <Input
-                  id="er-num"
-                  value={editForm.room_number}
-                  onChange={(e) => setEditForm((f) => ({ ...f, room_number: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Wing</Label>
-                <Select
-                  value={editForm.wing}
-                  onValueChange={(v) => setEditForm((f) => ({ ...f, wing: v as RoomWing }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {WING_VALUES.map((w) => (
-                      <SelectItem key={w} value={w}>
-                        {WING_LABELS[w]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Room type</Label>
-                <Select
-                  value={editForm.room_type}
-                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roomTypeValues.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {roomTypeLabels[t] ?? t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Capacity</Label>
-                <Select
-                  value={editForm.capacity_type}
-                  onValueChange={(v) =>
-                    setEditForm((f) => ({ ...f, capacity_type: v as CapacityType }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CAPACITY_VALUES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {CAPACITY_LABELS[c]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="er-max">Max pets</Label>
-                <Input
-                  id="er-max"
-                  type="number"
-                  inputMode="numeric"
-                  min={MIN_MAX_PETS}
-                  max={MAX_MAX_PETS}
-                  step={1}
-                  value={editForm.max_pets}
-                  onChange={(e) =>
-                    setEditForm((f) => ({
-                      ...f,
-                      max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
-                    }))
-                  }
-                />
-              </div>
-            </div>
+            <RoomFormFields form={editForm} setForm={setEditForm} idPrefix="er" />
             <DialogFooter>
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => {
                   setEditingRoom(null);
-                  setEditForm(EMPTY_EDIT_FORM);
+                  setEditForm(EMPTY_FORM);
                 }}
               >
                 Cancel
               </Button>
               <Button type="button" onClick={submitEditRoom} disabled={updateRoom.isPending}>
-                Save changes
+                {updateRoom.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1215,146 +869,108 @@ const RoomsAdminPage = () => {
             <DialogHeader>
               <DialogTitle>Add Room</DialogTitle>
             </DialogHeader>
-            <div className="grid gap-4 py-2">
-              <div className="grid gap-2">
-                <Label htmlFor="nr-name">Display name</Label>
-                <Input
-                  id="nr-name"
-                  value={newRoom.display_name}
-                  onChange={(e) => setNewRoom((f) => ({ ...f, display_name: e.target.value }))}
-                  placeholder="e.g. Bond Suite 1"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="nr-num">Room number</Label>
-                <Input
-                  id="nr-num"
-                  value={newRoom.room_number}
-                  onChange={(e) => setNewRoom((f) => ({ ...f, room_number: e.target.value }))}
-                  placeholder="e.g. 1"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Wing</Label>
-                <Select
-                  value={newRoom.wing}
-                  onValueChange={(v) => setNewRoom((f) => ({ ...f, wing: v as RoomWing }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {WING_VALUES.map((w) => (
-                      <SelectItem key={w} value={w}>
-                        {WING_LABELS[w]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Room type</Label>
-                <Select
-                  value={newRoom.room_type}
-                  onValueChange={(v) =>
-                    setNewRoom((f) => ({ ...f, room_type: v as RoomType }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roomTypeValues.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {roomTypeLabels[t] ?? t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Capacity</Label>
-                <Select
-                  value={newRoom.capacity_type}
-                  onValueChange={(v) =>
-                    setNewRoom((f) => ({ ...f, capacity_type: v as CapacityType }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CAPACITY_VALUES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {CAPACITY_LABELS[c]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Pet Type</Label>
-                <Select
-                  value={(newRoom as any).pet_type ?? "dog"}
-                  onValueChange={(v) => setNewRoom((f) => ({ ...f, pet_type: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="dog">Dog</SelectItem>
-                    <SelectItem value="cat">Cat</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="nr-max">Max pets</Label>
-                <Input
-                  id="nr-max"
-                  type="number"
-                  inputMode="numeric"
-                  min={MIN_MAX_PETS}
-                  max={MAX_MAX_PETS}
-                  step={1}
-                  value={newRoom.max_pets ?? MIN_MAX_PETS}
-                  onChange={(e) =>
-                    setNewRoom((f) => ({
-                      ...f,
-                      max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
-                    }))
-                  }
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3 gap-3">
-                <Label htmlFor="nr-cam" className="cursor-pointer shrink-0">
-                  Camera recording
-                </Label>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground tabular-nums">
-                    {newRoom.camera_recording ? "Yes" : "No"}
-                  </span>
-                  <Switch
-                    id="nr-cam"
-                    checked={!!newRoom.camera_recording}
-                    onCheckedChange={(v) => setNewRoom((f) => ({ ...f, camera_recording: v }))}
-                  />
-                </div>
-              </div>
-            </div>
+            <RoomFormFields form={newRoom} setForm={setNewRoom} idPrefix="nr" />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAddOpen(false)}>
                 Cancel
               </Button>
               <Button type="button" onClick={submitNewRoom} disabled={createRoom.isPending}>
-                Create room
+                {createRoom.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create room"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
       </main>
     </>
   );
 };
+
+function RoomFormFields({
+  form,
+  setForm,
+  idPrefix,
+}: {
+  form: RoomForm;
+  setForm: Dispatch<SetStateAction<RoomForm>>;
+  idPrefix: string;
+}) {
+  return (
+    <div className="grid gap-4 py-2">
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-name`}>Room name</Label>
+        <Input
+          id={`${idPrefix}-name`}
+          value={form.display_name}
+          onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))}
+          placeholder="e.g. DELUXE - 1"
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-num`}>Room number</Label>
+        <Input
+          id={`${idPrefix}-num`}
+          value={form.room_number}
+          onChange={(e) => setForm((f) => ({ ...f, room_number: e.target.value }))}
+          placeholder="e.g. 1"
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-color`}>Color</Label>
+        <Input
+          id={`${idPrefix}-color`}
+          type="color"
+          value={form.color || "#3B82F6"}
+          className="h-9 w-16 cursor-pointer p-1"
+          onChange={(e) => setForm((f) => ({ ...f, color: e.target.value.toUpperCase() }))}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-max`}>Max pets</Label>
+        <Input
+          id={`${idPrefix}-max`}
+          type="number"
+          min={MIN_MAX_PETS}
+          max={MAX_MAX_PETS}
+          value={form.max_pets}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              max_pets: clampMaxPets(parseInt(e.target.value, 10) || MIN_MAX_PETS),
+            }))
+          }
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-cam`}>Camera no</Label>
+        <Input
+          id={`${idPrefix}-cam`}
+          value={form.cam_number}
+          onChange={(e) => setForm((f) => ({ ...f, cam_number: e.target.value }))}
+          placeholder="Optional"
+        />
+      </div>
+      <div className="flex items-center justify-between rounded-md border p-3 gap-3">
+        <Label htmlFor={`${idPrefix}-rec`} className="cursor-pointer shrink-0">
+          Camera recording
+        </Label>
+        <Switch
+          id={`${idPrefix}-rec`}
+          checked={form.camera_recording}
+          onCheckedChange={(v) => setForm((f) => ({ ...f, camera_recording: v }))}
+        />
+      </div>
+      <div className="flex items-center justify-between rounded-md border p-3 gap-3">
+        <Label htmlFor={`${idPrefix}-active`} className="cursor-pointer shrink-0">
+          Active
+        </Label>
+        <Switch
+          id={`${idPrefix}-active`}
+          checked={form.is_active}
+          onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default RoomsAdminPage;

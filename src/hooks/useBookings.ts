@@ -3,7 +3,14 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
-import { fetchAllRooms } from "@/lib/roomsApi";
+import {
+  createRoomsAdminRoom,
+  fetchAllRooms,
+  fetchRoomsForAdmin,
+  updateRoomsAdminRoom,
+  type RoomsAdminInsert,
+  type RoomsAdminUpdate,
+} from "@/lib/roomsApi";
 
 type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 type BookingInsert = Database["public"]["Tables"]["bookings"]["Insert"];
@@ -182,35 +189,23 @@ export function useRooms() {
   });
 }
 
-/** Fetches ALL rooms regardless of active status — used by the admin table */
+/** Fetches ALL rooms for /settings/rooms (narrow column set). */
 export function useAllRooms() {
   const { session } = useAuth();
   return useQuery({
     queryKey: ["rooms", "all"],
     enabled: !!session,
-    queryFn: () => fetchAllRooms(false),
+    queryFn: () => fetchRoomsForAdmin(false),
     refetchOnMount: true,
   });
 }
-
-type RoomUpdate = Database["public"]["Tables"]["rooms"]["Update"];
-type RoomInsert = Database["public"]["Tables"]["rooms"]["Insert"];
 
 export function useUpdateRoom() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: RoomUpdate & { id: string }) => {
-      const { data, error } = await supabase
-        .from("rooms")
-        .update(updates)
-        .eq("id", id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as Room;
-    },
+    mutationFn: async ({ id, ...updates }: RoomsAdminUpdate & { id: string }) =>
+      updateRoomsAdminRoom(id, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
     },
@@ -221,11 +216,7 @@ export function useCreateRoom() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (payload: RoomInsert) => {
-      const { data, error } = await supabase.from("rooms").insert(payload).select().single();
-      if (error) throw error;
-      return data as Room;
-    },
+    mutationFn: (payload: RoomsAdminInsert) => createRoomsAdminRoom(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
     },
