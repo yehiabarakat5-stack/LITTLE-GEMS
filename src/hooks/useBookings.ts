@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -5,8 +6,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 import {
   createRoomsAdminRoom,
-  fetchAllRooms,
-  fetchBoardingCalendarRooms,
   fetchRoomsForAdmin,
   updateRoomsAdminRoom,
   type RoomsAdminInsert,
@@ -181,31 +180,38 @@ export function usePetBookings(petId: string) {
   });
 }
 
+/** Active rooms — single shared query for boarding hub + calendars (matches MSH). */
 export function useRooms() {
   const { session } = useAuth();
   return useQuery({
     queryKey: queryKeys.rooms(),
     enabled: !!session,
-    queryFn: () => fetchAllRooms(true),
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("rooms")
+        .select("*")
+        .eq("is_active", true)
+        .order("wing", { ascending: true })
+        .order("room_number", { ascending: true });
+
+      if (error) throw error;
+      return data as Room[];
+    },
   });
 }
 
-/** Active rooms for boarding calendar — lighter query, filtered by species in the hook. */
+/** Dog/cat slice of {@link useRooms} — no extra network request (MSH filters client-side). */
 export function useBoardingRooms(species: "dog" | "cat" = "dog") {
-  const { session } = useAuth();
-  return useQuery({
-    queryKey: [...queryKeys.rooms(), "boarding", "active", species] as const,
-    enabled: !!session,
-    staleTime: 60_000,
-    queryFn: async () => {
-      const rows = await fetchBoardingCalendarRooms();
-      return rows.filter((r) => {
-        if (r.is_active === false) return false;
-        if (species === "cat") return r.wing === "cattery";
-        return r.wing !== "cattery";
-      });
-    },
-  });
+  const query = useRooms();
+  const data = useMemo(
+    () =>
+      (query.data ?? []).filter((r) =>
+        species === "cat" ? r.wing === "cattery" : r.wing !== "cattery",
+      ),
+    [query.data, species],
+  );
+  return { ...query, data };
 }
 
 /** Fetches ALL rooms for /settings/rooms (narrow column set). */
