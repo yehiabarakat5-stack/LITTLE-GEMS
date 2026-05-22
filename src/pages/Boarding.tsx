@@ -13,8 +13,8 @@ import {
 import TopBar from "@/components/dashboard/TopBar";
 import {
   useBookings,
+  useBoardingCalendarBookings,
   useRooms,
-  useBoardingRooms,
   useCreateBooking,
   useUpdateBooking,
   isAssessmentRequiredError,
@@ -77,6 +77,13 @@ import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
 import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
+import { buildRoomDayBookingMaps } from "@/lib/boardingCalendarGrid";
+import {
+  IMPORT_PLACEHOLDER_STATUS_CLASS,
+  isImportPlaceholderBooking,
+  splitFacilityAndPlaceholderRooms,
+} from "@/lib/boardingUnknownKennel";
+import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
@@ -1062,8 +1069,8 @@ export function DogBoardingCalendar({
 
   // data
   const queryClient = useQueryClient();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
-  const { data: rooms = [], isLoading: roomsLoading } = useBoardingRooms("dog");
+  const { data: bookings = [], isLoading: bookingsLoading } = useBoardingCalendarBookings(startStr, endStr);
+  const { data: rooms = [], isLoading: roomsLoading } = useRooms();
   const { roomColWidth, onRoomColResizeStart } = useResizableRoomColumnWidth();
   const [visibleRoomLimit, setVisibleRoomLimit] = useState(CALENDAR_ROOMS_BATCH);
 
@@ -1295,8 +1302,15 @@ export function DogBoardingCalendar({
     return Array.from({ length: DAYS }, (_, i) => addDays(windowStart, i));
   }, [windowStart]);
 
-  // rooms grouped by wing (full list for picker; grid uses paginated slice)
-  const roomsByWing = useMemo(() => groupRoomsByWing(rooms), [rooms]);
+  const { facility: dogFacilityRooms, placeholders: dogPlaceholderRooms } = useMemo(
+    () => splitFacilityAndPlaceholderRooms(rooms, "dog"),
+    [rooms],
+  );
+
+  const assignableDogRooms = dogFacilityRooms;
+
+  // rooms grouped by wing (facility only; placeholders in UnknownKennel section)
+  const roomsByWing = useMemo(() => groupRoomsByWing(assignableDogRooms), [assignableDogRooms]);
 
   const orderedCalendarRooms = useMemo(() => {
     const extraWings = [...roomsByWing.keys()].filter((w) => !WING_ORDER.includes(w));
@@ -1320,6 +1334,11 @@ export function DogBoardingCalendar({
 
   const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
 
+  const visibleRoomIds = useMemo(
+    () => visibleCalendarRooms.map((r) => r.id),
+    [visibleCalendarRooms],
+  );
+
   // booking lookup: roomId → bookings (for this window)
   const bookingsByRoom = useMemo(() => {
     const map = new Map<string, BookingWithDetails[]>();
@@ -1330,6 +1349,20 @@ export function DogBoardingCalendar({
     });
     return map;
   }, [bookings]);
+
+  const roomDayMaps = useMemo(
+    () => buildRoomDayBookingMaps(bookingsByRoom, visibleRoomIds, days, windowStart, DAYS),
+    [bookingsByRoom, visibleRoomIds, days, windowStart],
+  );
+
+  const roomById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
+
+  const openBookingDetail = (booking: BookingWithDetails) => {
+    setDetailBooking({
+      ...booking,
+      rooms: roomById.get(booking.room_id) ?? booking.rooms ?? null,
+    });
+  };
 
   // open new booking drawer, optionally pre-fill room + date
   const openNewBooking = (roomId?: string, date?: string) => {
@@ -1391,7 +1424,7 @@ export function DogBoardingCalendar({
       toast.error("Cats belong in Cat boarding — switch to Cats above");
       return;
     }
-    const selectedRoom = rooms.find((r) => r.id === form.room_id);
+    const selectedRoom = assignableDogRooms.find((r) => r.id === form.room_id);
     if (selectedRoom?.wing === "cattery") {
       toast.error("Cannot book a dog into a cattery room");
       return;
@@ -1523,36 +1556,8 @@ export function DogBoardingCalendar({
   // ─── calendar rendering helpers ───────────────────────────────────────────
 
   // for a given room row, render booking chips + empty cells
-  const renderRoomRow = (roomId: string) => {
-    const roomBookings = bookingsByRoom.get(roomId) ?? [];
-
-    // build a day → booking map (only show chip on first visible day)
-    const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
-
-    roomBookings.forEach((b) => {
-      const ciDate = parseISO(b.check_in_date);
-      const coDate = parseISO(b.check_out_date);
-
-      days.forEach((day, idx) => {
-        const dayStr = toDateStr(day);
-        if (dayStr >= b.check_in_date && dayStr < b.check_out_date) {
-          // is this the first visible day of the booking?
-          const isFirst = dayStr === b.check_in_date || idx === 0;
-          if (isFirst) {
-            // calculate how many cells this chip spans (capped at remaining days)
-            const endOfWindow = toDateStr(addDays(windowStart, DAYS));
-            const chipEnd = b.check_out_date < endOfWindow ? b.check_out_date : endOfWindow;
-            const span = differenceInCalendarDays(
-              parseISO(chipEnd),
-              parseISO(dayStr === b.check_in_date ? b.check_in_date : toDateStr(day))
-            );
-            dayBookingMap.set(dayStr, { booking: b, span: Math.max(span, 1), isFirst: true });
-          } else if (!dayBookingMap.has(dayStr)) {
-            dayBookingMap.set(dayStr, { booking: b, span: 1, isFirst: false });
-          }
-        }
-      });
-    });
+  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
+    const dayBookingMap = roomDayMaps.get(roomId) ?? new Map();
 
     return (
       <div className="flex">
@@ -1574,7 +1579,6 @@ export function DogBoardingCalendar({
           }
 
           if (!entry.isFirst) {
-            // continuation cell — just a coloured bar, not clickable as chip
             return (
               <div
                 key={dayStr}
@@ -1591,6 +1595,7 @@ export function DogBoardingCalendar({
           ]
             .filter(Boolean)
             .join(" – ");
+          const chipPlaceholder = isPlaceholder || isImportPlaceholderBooking(booking);
 
           return (
             <div
@@ -1602,9 +1607,9 @@ export function DogBoardingCalendar({
                 marginRight: 2,
               }}
               className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
-                cursor-pointer truncate z-10 select-none
-                ${STATUS_CLASSES[booking.status]}`}
-              onClick={() => setDetailBooking(booking)}
+                cursor-pointer truncate z-10 select-none border border-dashed
+                ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
+              onClick={() => openBookingDetail(booking)}
             >
               <span className="truncate min-w-0 flex-1">{label || booking.booking_ref || "—"}</span>
               {bookingAnyPetHasAlerts(booking) ? (
@@ -1740,6 +1745,15 @@ export function DogBoardingCalendar({
                   </div>
                 );
               })}
+
+              <UnknownKennelCalendarSection
+                species="dog"
+                placeholderRooms={dogPlaceholderRooms}
+                roomColWidth={roomColWidth}
+                dayColWidth={DAY_COL_W}
+                daysWidth={DAY_COL_W * DAYS}
+                renderRoomRow={(roomId, isPlaceholder) => renderRoomRow(roomId, isPlaceholder)}
+              />
 
               {hasMoreCalendarRooms ? (
                 <div className="flex justify-center border-t border-border bg-card p-4">
@@ -1945,7 +1959,7 @@ export function DogBoardingCalendar({
                     className="w-full justify-between font-normal"
                   >
                     {form.room_id ? (() => {
-                      const sel = rooms.find((r) => r.id === form.room_id);
+                      const sel = assignableDogRooms.find((r) => r.id === form.room_id);
                       if (!sel) return "Select room";
                       const wl = WING_LABELS[normalizeRoomWing(sel.wing)] ?? formatSlugLabel(sel.wing);
                       return `${wl} | ${formatRoomPickerLabel(sel)}`;
@@ -1955,7 +1969,7 @@ export function DogBoardingCalendar({
                 </PopoverTrigger>
                 <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
                   <Command filter={(value, search) => {
-                    const r = rooms.find((rm) => rm.id === value);
+                    const r = assignableDogRooms.find((rm) => rm.id === value);
                     if (!r) return 0;
                     const q = search.toLowerCase();
                     const wl = (WING_LABELS[normalizeRoomWing(r.wing)] ?? formatSlugLabel(r.wing)).toLowerCase();
@@ -2772,8 +2786,8 @@ function CatBoardingCalendar({
   const endStr = toDateStr(windowEnd);
 
   const queryClient = useQueryClient();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBookings(startStr, endStr);
-  const { data: catRooms = [], isLoading: roomsLoading } = useBoardingRooms("cat");
+  const { data: bookings = [], isLoading: bookingsLoading } = useBoardingCalendarBookings(startStr, endStr);
+  const { data: roomsAll = [], isLoading: roomsLoading } = useRooms();
   const { roomColWidth, onRoomColResizeStart } = useResizableRoomColumnWidth();
   const [visibleRoomLimit, setVisibleRoomLimit] = useState(CALENDAR_ROOMS_BATCH);
 
@@ -2781,15 +2795,20 @@ function CatBoardingCalendar({
     setVisibleRoomLimit(CALENDAR_ROOMS_BATCH);
   }, [windowStart]);
 
+  const { facility: catFacilityRooms, placeholders: catPlaceholderRooms } = useMemo(
+    () => splitFacilityAndPlaceholderRooms(roomsAll, "cat"),
+    [roomsAll],
+  );
+
   const roomsByTier = useMemo(() => {
     const map = new Map<CatRoomType, Room[]>();
     CAT_TIER_ORDER.forEach((t) => map.set(t, []));
-    catRooms.forEach((r) => {
+    catFacilityRooms.forEach((r) => {
       const rt = r.room_type as CatRoomType;
       if (map.has(rt)) map.get(rt)!.push(r);
     });
     return map;
-  }, [catRooms]);
+  }, [catFacilityRooms]);
 
   const orderedCalendarRooms = useMemo(() => {
     const out: Room[] = [];
@@ -2815,6 +2834,11 @@ function CatBoardingCalendar({
   }, [visibleCalendarRooms]);
 
   const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
+
+  const visibleCatRoomIds = useMemo(
+    () => visibleCalendarRooms.map((r) => r.id),
+    [visibleCalendarRooms],
+  );
 
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [detailBooking, setDetailBooking] = useState<BookingWithDetails | null>(null);
@@ -3038,6 +3062,20 @@ function CatBoardingCalendar({
     return map;
   }, [bookings]);
 
+  const roomDayMaps = useMemo(
+    () => buildRoomDayBookingMaps(bookingsByRoom, visibleCatRoomIds, days, windowStart, DAYS),
+    [bookingsByRoom, visibleCatRoomIds, days, windowStart],
+  );
+
+  const catRoomById = useMemo(() => new Map(roomsAll.map((r) => [r.id, r])), [roomsAll]);
+
+  const openBookingDetail = (booking: BookingWithDetails) => {
+    setDetailBooking({
+      ...booking,
+      rooms: catRoomById.get(booking.room_id) ?? booking.rooms ?? null,
+    });
+  };
+
   const openNewBooking = (roomId?: string, date?: string) => {
     setForm({
       ...CAT_BLANK_FORM,
@@ -3096,7 +3134,7 @@ function CatBoardingCalendar({
       toast.error("Only cats can be added to cat boarding rooms");
       return;
     }
-    const selectedRoom = catRooms.find((r) => r.id === form.room_id);
+    const selectedRoom = catFacilityRooms.find((r) => r.id === form.room_id);
     if (!selectedRoom) {
       toast.error("Please select a cat boarding room");
       return;
@@ -3227,26 +3265,8 @@ function CatBoardingCalendar({
     });
   };
 
-  const renderRoomRow = (roomId: string) => {
-    const roomBookings = bookingsByRoom.get(roomId) ?? [];
-    const dayBookingMap = new Map<string, { booking: BookingWithDetails; span: number; isFirst: boolean }>();
-
-    roomBookings.forEach((b) => {
-      days.forEach((day, idx) => {
-        const dayStr = toDateStr(day);
-        if (dayStr >= b.check_in_date && dayStr < b.check_out_date) {
-          const isFirst = dayStr === b.check_in_date || idx === 0;
-          if (isFirst) {
-            const endOfWindow = toDateStr(addDays(windowStart, DAYS));
-            const chipEnd = b.check_out_date < endOfWindow ? b.check_out_date : endOfWindow;
-            const span = differenceInCalendarDays(parseISO(chipEnd), parseISO(dayStr === b.check_in_date ? b.check_in_date : toDateStr(day)));
-            dayBookingMap.set(dayStr, { booking: b, span: Math.max(span, 1), isFirst: true });
-          } else if (!dayBookingMap.has(dayStr)) {
-            dayBookingMap.set(dayStr, { booking: b, span: 1, isFirst: false });
-          }
-        }
-      });
-    });
+  const renderRoomRow = (roomId: string, isPlaceholder = false) => {
+    const dayBookingMap = roomDayMaps.get(roomId) ?? new Map();
 
     return (
       <div className="flex">
@@ -3279,13 +3299,14 @@ function CatBoardingCalendar({
           const { booking, span } = entry;
           const names = booking.booking_pets.map((bp) => bp.pets?.name ?? "").filter(Boolean);
           const label = formatBookingCell(names, booking.owners?.last_name ?? "") || booking.booking_ref || "—";
+          const chipPlaceholder = isPlaceholder || isImportPlaceholderBooking(booking);
 
           return (
             <div
               key={dayStr}
               style={{ minWidth: DAY_COL_W * span - 4, width: DAY_COL_W * span - 4, marginLeft: 2, marginRight: 2 }}
-              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1 cursor-pointer truncate z-10 select-none ${STATUS_CLASSES[booking.status]}`}
-              onClick={() => setDetailBooking(booking)}
+              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1 cursor-pointer truncate z-10 select-none border border-dashed ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
+              onClick={() => openBookingDetail(booking)}
             >
               <span className="truncate min-w-0 flex-1">{label}</span>
               {bookingAnyPetHasAlerts(booking) ? (
@@ -3327,7 +3348,7 @@ function CatBoardingCalendar({
         <div className={suppressToolbar ? "" : "flex-1 overflow-auto"}>
           {isLoading ? (
             <div className="p-8 space-y-3">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-          ) : catRooms.length === 0 ? (
+          ) : catFacilityRooms.length === 0 ? (
             <p className="p-8 text-sm text-muted-foreground">No active cat boarding rooms found. Add rooms with cat wing in Settings &rarr; Rooms.</p>
           ) : (
             <div style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}>
@@ -3378,6 +3399,15 @@ function CatBoardingCalendar({
                   </div>
                 );
               })}
+
+              <UnknownKennelCalendarSection
+                species="cat"
+                placeholderRooms={catPlaceholderRooms}
+                roomColWidth={roomColWidth}
+                dayColWidth={DAY_COL_W}
+                daysWidth={DAY_COL_W * DAYS}
+                renderRoomRow={(roomId, isPlaceholder) => renderRoomRow(roomId, isPlaceholder)}
+              />
 
               {hasMoreCalendarRooms ? (
                 <div className="flex justify-center border-t border-border bg-card p-4">

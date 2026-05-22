@@ -46,6 +46,10 @@ const BOOKING_BASE_SELECT =
 const BOOKING_DETAIL_SELECT =
   `${BOOKING_BASE_SELECT}, booking_items(count)`;
 
+/** Calendar grid — booking fields + relations, without nested rooms(*) per row. */
+const BOOKING_CALENDAR_SELECT =
+  `*, owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts)), booking_items(count)`;
+
 /** Payload accepted by useCreateBooking — booking fields + pet_ids to link */
 export type CreateBookingPayload = Omit<BookingInsert, "id" | "created_at" | "updated_at"> & {
   pet_ids: string[];
@@ -90,6 +94,41 @@ export function useBookings(startDate: string, endDate: string) {
           const { data: d2, error: e2 } = await supabase
             .from("bookings")
             .select(BOOKING_BASE_SELECT)
+            .lte("check_in_date", endDate)
+            .gte("check_out_date", startDate)
+            .neq("status", "cancelled")
+            .order("check_in_date", { ascending: true });
+          if (e2) throw e2;
+          return d2 as BookingWithDetails[];
+        }
+        throw error;
+      }
+      return data as BookingWithDetails[];
+    },
+  });
+}
+
+/** Boarding calendar — lighter payload (no rooms(*) join); cached per date window. */
+export function useBoardingCalendarBookings(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: [...queryKeys.bookings(startDate, endDate), "calendar"] as const,
+    enabled: !!startDate && !!endDate,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select(BOOKING_CALENDAR_SELECT)
+        .lte("check_in_date", endDate)
+        .gte("check_out_date", startDate)
+        .neq("status", "cancelled")
+        .order("check_in_date", { ascending: true });
+
+      if (error) {
+        if (error.message?.includes("booking_items")) {
+          const fallbackSelect = BOOKING_CALENDAR_SELECT.replace(", booking_items(count)", "");
+          const { data: d2, error: e2 } = await supabase
+            .from("bookings")
+            .select(fallbackSelect)
             .lte("check_in_date", endDate)
             .gte("check_out_date", startDate)
             .neq("status", "cancelled")
@@ -182,10 +221,8 @@ export function usePetBookings(petId: string) {
 
 /** Active rooms — single shared query for boarding hub + calendars (matches MSH). */
 export function useRooms() {
-  const { session } = useAuth();
   return useQuery({
     queryKey: queryKeys.rooms(),
-    enabled: !!session,
     staleTime: 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
