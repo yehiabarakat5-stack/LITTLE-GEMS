@@ -1692,6 +1692,7 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean
+          label_color: string | null
           max_pets: number
           nightly_rate: number | null
           notes: string | null
@@ -1714,6 +1715,7 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean
+          label_color?: string | null
           max_pets?: number
           nightly_rate?: number | null
           notes?: string | null
@@ -1736,6 +1738,7 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean
+          label_color?: string | null
           max_pets?: number
           nightly_rate?: number | null
           notes?: string | null
@@ -1745,6 +1748,27 @@ export type Database = {
           room_type?: Database["public"]["Enums"]["room_type"]
           street_name?: string | null
           wing?: Database["public"]["Enums"]["room_wing"]
+        }
+        Relationships: []
+      }
+      room_types: {
+        Row: {
+          created_at: string
+          is_builtin: boolean
+          label: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          is_builtin?: boolean
+          label: string
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          is_builtin?: boolean
+          label?: string
+          slug?: string
         }
         Relationships: []
       }
@@ -2257,6 +2281,21 @@ export type Database = {
         | "park_lane"
         | "pall_mall"
         | "kennels"
+        | "deluxe"
+        | "royal"
+        | "standard_luxury"
+        | "little_gems"
+        | "presidential"
+        | "lg_rn"
+        | "lg_rn_big"
+        | "gr"
+        | "fl"
+        | "community_boarding_chalet"
+        | "kitchen"
+        | "waiting_list"
+        | "presidential_double"
+        | "royal_double"
+        | "little_gems_dbl"
       room_wing:
         | "oxford"
         | "piccadilly"
@@ -2268,6 +2307,8 @@ export type Database = {
         | "bond_rooms"
         | "dluxe"
         | "standard_room"
+        | "little_gems"
+        | "lg_resting_nook"
       species: "dog" | "cat" | "other"
       staff_role:
         | "booking_coordinator"
@@ -2488,6 +2529,21 @@ export const Constants = {
         "park_lane",
         "pall_mall",
         "kennels",
+        "deluxe",
+        "royal",
+        "standard_luxury",
+        "little_gems",
+        "presidential",
+        "lg_rn",
+        "lg_rn_big",
+        "gr",
+        "fl",
+        "community_boarding_chalet",
+        "kitchen",
+        "waiting_list",
+        "presidential_double",
+        "royal_double",
+        "little_gems_dbl",
       ],
       room_wing: [
         "oxford",
@@ -2500,6 +2556,8 @@ export const Constants = {
         "bond_rooms",
         "dluxe",
         "standard_room",
+        "little_gems",
+        "lg_resting_nook",
       ],
       species: ["dog", "cat", "other"],
       staff_role: [

@@ -15,14 +15,15 @@ import {
   useEffect,
   KeyboardEvent,
 } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import TopBar from "@/components/dashboard/TopBar";
-import { useUpdateRoom, useCreateRoom, useDeleteRoom } from "@/hooks/useBookings";
+import { useUpdateRoom, useCreateRoom, useAllRooms } from "@/hooks/useBookings";
+import { useRoomTypesQuery } from "@/hooks/useRoomTypes";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -40,16 +41,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -58,9 +49,9 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { Plus, Trash2, Download, Pencil } from "lucide-react";
-import * as XLSX from "xlsx";
+import { Plus, Pencil, Loader2, Search } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
@@ -96,6 +87,7 @@ const WING_LABELS: Record<string, string> = {
   lg_grooming_room: "LG Grooming Room",
   furrari_lounge: "Furrari Lounge",
   kitchen: "Kitchen",
+  import_placeholder: "Import placeholder (unknown kennel)",
 };
 
 const ROOM_TYPE_LABELS: Record<string, string> = {
@@ -172,9 +164,25 @@ const MIN_MAX_PETS = 1;
 const MAX_MAX_PETS = 100;
 const ROOMS_PAGE_SIZE = 50;
 
-/** Columns required for admin table, filters, export, and inline edits */
-const ROOMS_ADMIN_SELECT =
-  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, cam_number, camera_recording, is_active";
+const ROOM_LABEL_PRESET_COLORS = [
+  "#EF4444",
+  "#F97316",
+  "#EAB308",
+  "#22C55E",
+  "#14B8A6",
+  "#3B82F6",
+  "#8B5CF6",
+  "#EC4899",
+  "#78716C",
+  "#FFFFFF",
+] as const;
+
+function normalizeHexColor(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^#[0-9A-Fa-f]{6}$/.test(trimmed)) return trimmed.toUpperCase();
+  return null;
+}
 
 function clampMaxPets(n: number): number {
   if (!Number.isFinite(n)) return MIN_MAX_PETS;
@@ -290,8 +298,6 @@ function MaxPetsCell({
 
 type EditingCell = { id: string; field: string } | null;
 
-type Species = "dog" | "cat";
-
 /** Supabase / react-query often pass plain objects, not Error instances. */
 function formatRoomMutationError(err: unknown): string {
   if (err == null) return "Unknown error";
@@ -322,8 +328,11 @@ function formatRoomMutationError(err: unknown): string {
   return String(err);
 }
 
-function roomsCameraRecordingMigrationHint(message: string): string | null {
+function roomsSchemaMigrationHint(message: string): string | null {
   const m = message.toLowerCase();
+  if (m.includes("label_color")) {
+    return "The database is missing column rooms.label_color. Apply sql/add-rooms-label-color.sql in the Supabase SQL Editor, then refresh the app.";
+  }
   if (
     m.includes("camera_recording") ||
     (m.includes("schema cache") && m.includes("rooms")) ||
@@ -336,71 +345,80 @@ function roomsCameraRecordingMigrationHint(message: string): string | null {
 
 function toastRoomSaveFailed(err: unknown) {
   const msg = formatRoomMutationError(err);
-  const hint = roomsCameraRecordingMigrationHint(msg);
+  const hint = roomsSchemaMigrationHint(msg);
   toast.error(hint ?? `Save failed: ${msg}`, hint ? { duration: 12_000 } : undefined);
 }
 
-const DOG_WINGS: string[] = [
-  "oxford",
-  "back_kennels",
-  "piccadilly",
-  "park_lane",
-  "fleet",
-  "royal_annex",
-  "royal_suite",
-  "bond_suite",
-  "pall_mall",
-  "deluxe_suite",
-  "deluxe_annex",
-  "standard_suite",
-  "little_gems",
-  "lg_resting_nook",
-  "lg_grooming_room",
-  "furrari_lounge",
-  "grooming_room",
-  "training_room",
-  "kitchen",
-  "bond_rooms",
-  "dluxe",
-  "standard_room",
-];
-const CAT_WINGS: string[] = ["cattery"];
+function RoomColorCell({
+  room,
+  onSave,
+}: {
+  room: Room;
+  onSave: (roomId: string, labelColor: string | null) => void;
+}) {
+  const color = normalizeHexColor(room.label_color);
 
-const WING_FILTER_OPTIONS: { value: string; label: string }[] = [
-  { value: "__all__", label: "All Wings" },
-  { value: "oxford", label: "Oxford Street" },
-  { value: "back_kennels", label: "Back Kennels" },
-  { value: "piccadilly", label: "Piccadilly" },
-  { value: "park_lane", label: "Park Lane" },
-  { value: "fleet", label: "Fleet" },
-  { value: "royal_annex", label: "Royal Annex" },
-  { value: "royal_suite", label: "Royal Suite" },
-  { value: "bond_suite", label: "Bond Suite" },
-  { value: "pall_mall", label: "Pall Mall" },
-  { value: "deluxe_suite", label: "Deluxe Suite" },
-  { value: "deluxe_annex", label: "Deluxe Annex" },
-  { value: "standard_suite", label: "Standard Suite" },
-  { value: "little_gems", label: "Little Gems" },
-  { value: "lg_resting_nook", label: "LG Resting Nook" },
-  { value: "lg_grooming_room", label: "LG Grooming Room" },
-  { value: "furrari_lounge", label: "Furrari Lounge" },
-  { value: "grooming_room", label: "Grooming Room" },
-  { value: "training_room", label: "Training Room" },
-  { value: "kitchen", label: "Kitchen" },
-];
-
-const ROOM_TYPE_FILTER_OPTIONS: { value: string; label: string; types: string[] }[] = [
-  { value: "__all__", label: "All Types", types: [] },
-  { value: "presidential", label: "Presidential", types: ["presidential_super", "presidential_standard", "presidential_single", "presidential_double"] },
-  { value: "royal_suite", label: "Royal Suite", types: ["royal_suite_single", "royal_suite_double", "single_royal", "double_royal", "royal_annex"] },
-  { value: "deluxe", label: "Deluxe", types: ["deluxe", "cattery_deluxe"] },
-  { value: "standard", label: "Standard", types: ["standard", "standard_glass"] },
-  { value: "lg_royal", label: "LG Royal", types: ["lg_royal", "lg_royal_double"] },
-  { value: "lg_deluxe", label: "LG Deluxe", types: ["lg_deluxe"] },
-  { value: "lg_presidential", label: "LG Presidential", types: ["lg_presidential", "lg_presidential_double"] },
-  { value: "lg_standard", label: "LG Standard", types: ["lg_standard", "lg_standard_luxury"] },
-  { value: "family_room", label: "Family Room", types: ["family_room"] },
-];
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/60 transition-colors"
+          aria-label={`Set color label for ${room.display_name}`}
+        >
+          <span
+            className="h-5 w-5 shrink-0 rounded-full border border-border shadow-sm"
+            style={{ backgroundColor: color ?? "transparent" }}
+          />
+          <span className="text-[10px] text-muted-foreground tabular-nums">
+            {color ?? "None"}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-3" align="start">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Room color label</p>
+        <div className="grid grid-cols-5 gap-2">
+          {ROOM_LABEL_PRESET_COLORS.map((preset) => {
+            const selected = color === preset;
+            return (
+              <button
+                key={preset}
+                type="button"
+                title={preset}
+                className={`h-7 w-7 rounded-full border transition-transform hover:scale-105 ${
+                  selected ? "ring-2 ring-ring ring-offset-2" : "border-border"
+                }`}
+                style={{ backgroundColor: preset }}
+                onClick={() => onSave(room.id, preset)}
+              />
+            );
+          })}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Label htmlFor={`room-color-${room.id}`} className="text-xs shrink-0">
+            Custom
+          </Label>
+          <Input
+            id={`room-color-${room.id}`}
+            type="color"
+            value={color ?? "#3B82F6"}
+            className="h-8 w-12 cursor-pointer p-1"
+            onChange={(e) => onSave(room.id, e.target.value.toUpperCase())}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-2 h-8 w-full text-xs"
+          onClick={() => onSave(room.id, null)}
+        >
+          Clear color
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -409,8 +427,8 @@ function todayISO() {
 const emptyInsertDefaults = (): Omit<RoomInsert, "id" | "created_at"> => ({
   display_name: "",
   room_number: "",
-  wing: "oxford",
-  room_type: "single_royal",
+  wing: "little_gems" as RoomWing,
+  room_type: "deluxe" as RoomType,
   capacity_type: "single",
   max_pets: 1,
   is_active: true,
@@ -421,7 +439,7 @@ type RoomEditForm = {
   display_name: string;
   room_number: string;
   wing: RoomWing;
-  room_type: RoomType;
+  room_type: string;
   capacity_type: CapacityType;
   max_pets: number;
 };
@@ -429,8 +447,8 @@ type RoomEditForm = {
 const EMPTY_EDIT_FORM: RoomEditForm = {
   display_name: "",
   room_number: "",
-  wing: "oxford",
-  room_type: "single_royal",
+  wing: "little_gems" as RoomWing,
+  room_type: "deluxe" as RoomType,
   capacity_type: "single",
   max_pets: MIN_MAX_PETS,
 };
@@ -447,37 +465,54 @@ function roomToEditForm(room: Room): RoomEditForm {
 }
 
 const RoomsAdminPage = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialSpecies: Species = searchParams.get("species") === "cat" ? "cat" : "dog";
-  const [species, setSpecies] = useState<Species>(initialSpecies);
-
-  const { data: allRooms, isLoading } = useQuery({
-    queryKey: ["rooms", "all"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("rooms")
-        .select(ROOMS_ADMIN_SELECT)
-        .order("display_name", { ascending: true })
-        .order("wing", { ascending: true })
-        .order("room_number", { ascending: true });
-      if (error) throw error;
-      return data as Room[];
-    },
-  });
+  const { data: allRooms, isLoading, isError, error } = useAllRooms();
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
-  const deleteRoom = useDeleteRoom();
+  const roomTypesQ = useRoomTypesQuery();
+  const { roomTypeValues, roomTypeLabels } = useMemo(() => {
+    const labels: Record<string, string> = { ...ROOM_TYPE_LABELS };
+    const slugs = new Set<string>(ROOM_TYPE_VALUES);
 
-  const rooms = useMemo(() => {
-    if (!allRooms) return undefined;
-    return allRooms.filter((r) =>
-      species === "cat" ? r.wing === "cattery" : r.wing !== "cattery",
+    for (const rt of roomTypesQ.data ?? []) {
+      labels[rt.slug] = rt.label;
+      slugs.add(rt.slug);
+    }
+
+    for (const room of allRooms ?? []) {
+      if (room.room_type && !slugs.has(room.room_type)) {
+        slugs.add(room.room_type);
+        labels[room.room_type] =
+          labels[room.room_type] ?? room.room_type.replace(/_/g, " ");
+      }
+    }
+
+    const values = Array.from(slugs).sort((a, b) =>
+      (labels[a] ?? a).localeCompare(labels[b] ?? b),
     );
-  }, [allRooms, species]);
+
+    return { roomTypeValues: values, roomTypeLabels: labels };
+  }, [roomTypesQ.data, allRooms]);
+
+  const rooms = allRooms;
   const [searchQuery, setSearchQuery] = useState("");
-  const [wingFilter, setWingFilter] = useState("__all__");
   const [typeFilter, setTypeFilter] = useState("__all__");
+  const [typeFilterSearch, setTypeFilterSearch] = useState("");
+  const [typeFilterOpen, setTypeFilterOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(ROOMS_PAGE_SIZE);
+
+  const roomTypeFilterOptions = useMemo(() => {
+    const opts = [{ value: "__all__", label: "All room types" }];
+    for (const slug of roomTypeValues) {
+      opts.push({ value: slug, label: roomTypeLabels[slug] ?? slug });
+    }
+    return opts;
+  }, [roomTypeValues, roomTypeLabels]);
+
+  const filteredRoomTypeOptions = useMemo(() => {
+    const q = typeFilterSearch.trim().toLowerCase();
+    if (!q) return roomTypeFilterOptions;
+    return roomTypeFilterOptions.filter((o) => o.label.toLowerCase().includes(q));
+  }, [roomTypeFilterOptions, typeFilterSearch]);
 
   const { data: occupiedRoomIds } = useQuery({
     queryKey: ["rooms", "occupied-today"],
@@ -503,22 +538,16 @@ const RoomsAdminPage = () => {
       result = result.filter((r) => {
         const name = r.display_name.toLowerCase();
         const wing = (WING_LABELS[r.wing as RoomWing] ?? r.wing).toLowerCase();
-        const type = (ROOM_TYPE_LABELS[r.room_type as RoomType] ?? r.room_type).toLowerCase();
+        const type = (roomTypeLabels[r.room_type] ?? r.room_type).toLowerCase();
         const num = r.room_number.toLowerCase();
         return name.includes(q) || wing.includes(q) || type.includes(q) || num.includes(q);
       });
     }
-    if (wingFilter !== "__all__") {
-      result = result.filter((r) => r.wing === wingFilter);
-    }
     if (typeFilter !== "__all__") {
-      const group = ROOM_TYPE_FILTER_OPTIONS.find((o) => o.value === typeFilter);
-      if (group && group.types.length > 0) {
-        result = result.filter((r) => group.types.includes(r.room_type));
-      }
+      result = result.filter((r) => r.room_type === typeFilter);
     }
     return result;
-  }, [rooms, searchQuery, wingFilter, typeFilter]);
+  }, [rooms, searchQuery, typeFilter, roomTypeLabels]);
 
   const visibleRooms = useMemo(
     () => (filteredRooms ?? []).slice(0, visibleCount),
@@ -530,19 +559,11 @@ const RoomsAdminPage = () => {
 
   useEffect(() => {
     setVisibleCount(ROOMS_PAGE_SIZE);
-  }, [searchQuery, wingFilter, typeFilter, species]);
+  }, [searchQuery, typeFilter]);
 
   const loadMore = useCallback(() => {
     setVisibleCount((c) => c + ROOMS_PAGE_SIZE);
   }, []);
-
-  const handleSpeciesChange = useCallback(
-    (s: Species) => {
-      setSpecies(s);
-      setSearchParams({ species: s }, { replace: true });
-    },
-    [setSearchParams],
-  );
 
   const [editingCell, setEditingCell] = useState<EditingCell>(null);
   const [editValue, setEditValue] = useState("");
@@ -558,8 +579,6 @@ const RoomsAdminPage = () => {
 
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [editForm, setEditForm] = useState<RoomEditForm>(EMPTY_EDIT_FORM);
-
-  const [pendingDelete, setPendingDelete] = useState<Room | null>(null);
 
   const isEditing = useCallback(
     (id: string, field: string) =>
@@ -704,28 +723,26 @@ const RoomsAdminPage = () => {
         },
         onError: (err) => {
           const msg = formatRoomMutationError(err);
-          const hint = roomsCameraRecordingMigrationHint(msg);
+          const hint = roomsSchemaMigrationHint(msg);
           toast.error(hint ?? msg, hint ? { duration: 12_000 } : undefined);
         },
       },
     );
   }, [newRoom, createRoom]);
 
-  const confirmDelete = useCallback(() => {
-    if (!pendingDelete) return;
-    deleteRoom.mutate(pendingDelete.id, {
-      onSuccess: () => {
-        toast.success(`Deleted ${pendingDelete.display_name}`);
-        setPendingDelete(null);
-      },
-      onError: (err) =>
-        toast.error(formatRoomMutationError(err) || "Delete failed (room may have bookings)."),
-    });
-  }, [pendingDelete, deleteRoom]);
-
   const saveMaxPets = useCallback(
     (roomId: string, max_pets: number) => {
       updateRoom.mutate({ id: roomId, max_pets }, { onError: toastRoomSaveFailed });
+    },
+    [updateRoom],
+  );
+
+  const saveRoomColor = useCallback(
+    (roomId: string, label_color: string | null) => {
+      updateRoom.mutate(
+        { id: roomId, label_color: normalizeHexColor(label_color) },
+        { onError: toastRoomSaveFailed },
+      );
     },
     [updateRoom],
   );
@@ -806,21 +823,8 @@ const RoomsAdminPage = () => {
     </Select>
   );
 
-  const handleExport = useCallback(() => {
-    const data = (filteredRooms ?? []).map((room) => ({
-      "Room Name": room.display_name,
-      "Room No": room.room_number,
-      "Wing": WING_LABELS[room.wing as RoomWing] ?? room.wing,
-      "Room Type": ROOM_TYPE_LABELS[room.room_type as RoomType] ?? room.room_type,
-      "Capacity": CAPACITY_LABELS[room.capacity_type as CapacityType] ?? room.capacity_type,
-      "Max Pets": room.max_pets,
-      "Status": occupiedRoomIds?.has(room.id) ? "Occupied" : "Available",
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Rooms");
-    XLSX.writeFile(wb, `rooms-export-${todayISO()}.xlsx`);
-  }, [filteredRooms, occupiedRoomIds]);
+  const selectedTypeFilterLabel =
+    roomTypeFilterOptions.find((o) => o.value === typeFilter)?.label ?? "All room types";
 
   return (
     <>
@@ -830,32 +834,14 @@ const RoomsAdminPage = () => {
           <div>
             <h2 className="text-xl font-semibold">Room Management</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Click any cell to edit. Changes save automatically on blur. Use Add room to create a
-              row, or delete to remove (only if no bookings reference the room).
+              Click any cell to edit inline. Status shows occupied rooms for today. Use the pencil
+              icon for full room details.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <Button type="button" onClick={() => setAddOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add room
-            </Button>
-            <div className="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
-              <button
-                type="button"
-                className={`px-3 py-1.5 transition-colors ${species === "dog" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-                onClick={() => handleSpeciesChange("dog")}
-              >
-                Dogs
-              </button>
-              <button
-                type="button"
-                className={`px-3 py-1.5 transition-colors ${species === "cat" ? "bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}
-                onClick={() => handleSpeciesChange("cat")}
-              >
-                Cats
-              </button>
-            </div>
-          </div>
+          <Button type="button" onClick={() => setAddOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Room
+          </Button>
         </div>
 
         {isLoading ? (
@@ -864,6 +850,14 @@ const RoomsAdminPage = () => {
               <Skeleton key={i} className="h-12 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load rooms</AlertTitle>
+            <AlertDescription>
+              {roomsSchemaMigrationHint(formatRoomMutationError(error)) ??
+                formatRoomMutationError(error)}
+            </AlertDescription>
+          </Alert>
         ) : !rooms || rooms.length === 0 ? (
           <p className="text-muted-foreground">No rooms found.</p>
         ) : (
@@ -876,51 +870,55 @@ const RoomsAdminPage = () => {
               placeholder="Search room name..."
               className="w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <Select value={wingFilter} onValueChange={setWingFilter}>
-              <SelectTrigger className="w-[180px] h-9 text-sm">
-                <SelectValue placeholder="Filter by Wing" />
-              </SelectTrigger>
-              <SelectContent>
-                {WING_FILTER_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="text-sm">
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-[180px] h-9 text-sm">
-                <SelectValue placeholder="Filter by Room Type" />
-              </SelectTrigger>
-              <SelectContent>
-                {ROOM_TYPE_FILTER_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="text-sm">
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export
-            </Button>
+            <Popover open={typeFilterOpen} onOpenChange={setTypeFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 min-w-[200px] justify-between font-normal">
+                  {selectedTypeFilterLabel}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[260px] p-2" align="start">
+                <div className="relative mb-2">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={typeFilterSearch}
+                    onChange={(e) => setTypeFilterSearch(e.target.value)}
+                    placeholder="Search room types..."
+                    className="h-8 pl-8 text-sm"
+                  />
+                </div>
+                <div className="max-h-56 overflow-y-auto space-y-0.5">
+                  {filteredRoomTypeOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                        typeFilter === opt.value ? "bg-muted font-medium" : ""
+                      }`}
+                      onClick={() => {
+                        setTypeFilter(opt.value);
+                        setTypeFilterOpen(false);
+                        setTypeFilterSearch("");
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  {filteredRoomTypeOptions.length === 0 ? (
+                    <p className="px-2 py-2 text-xs text-muted-foreground">No matching types</p>
+                  ) : null}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
                   <TableHead className="min-w-[180px]">Room name</TableHead>
-                  <TableHead className="min-w-[88px] w-[88px] text-center">Room no.</TableHead>
-                  <TableHead className="min-w-[150px]">Wing</TableHead>
-                  <TableHead className="min-w-[190px]">Room Type</TableHead>
-                  <TableHead className="min-w-[120px]">Capacity</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Max Pets</TableHead>
-                  <TableHead className="min-w-[100px]">Camera No.</TableHead>
+                  <TableHead className="min-w-[88px] w-[88px] text-center">Color</TableHead>
+                  <TableHead className="min-w-[88px] w-[88px] text-center">Room number</TableHead>
+                  <TableHead className="text-right min-w-[80px]">Max pets</TableHead>
+                  <TableHead className="min-w-[100px]">Camera no</TableHead>
                   <TableHead className="text-center min-w-[120px]">Camera recording</TableHead>
                   <TableHead className="text-center min-w-[100px]">Status</TableHead>
                   <TableHead className="text-center min-w-[80px]">Active</TableHead>
@@ -929,13 +927,27 @@ const RoomsAdminPage = () => {
               </TableHeader>
 
               <TableBody>
-                {visibleRooms.map((room) => (
+                {visibleRooms.map((room) => {
+                  const rowColor = normalizeHexColor(room.label_color);
+                  return (
                   <TableRow
                     key={room.id}
                     className={room.is_active ? "" : "opacity-50 bg-muted/20"}
+                    style={
+                      rowColor
+                        ? { boxShadow: `inset 4px 0 0 0 ${rowColor}` }
+                        : undefined
+                    }
                   >
                     <TableCell>
-                      <span className="font-medium">
+                      <span className="font-medium flex items-center gap-2 min-w-0">
+                        {rowColor ? (
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full border border-border/60"
+                            style={{ backgroundColor: rowColor }}
+                            title={rowColor}
+                          />
+                        ) : null}
                         <TextCell
                           room={room}
                           field="display_name"
@@ -945,39 +957,13 @@ const RoomsAdminPage = () => {
                     </TableCell>
 
                     <TableCell className="text-center">
+                      <RoomColorCell room={room} onSave={saveRoomColor} />
+                    </TableCell>
+
+                    <TableCell className="text-center">
                       <span className="inline-block min-w-[2.5rem] font-mono text-sm tabular-nums">
                         <TextCell room={room} field="room_number" value={room.room_number} />
                       </span>
-                    </TableCell>
-
-                    <TableCell>
-                      <EnumCell<RoomWing>
-                        room={room}
-                        field="wing"
-                        value={room.wing}
-                        options={WING_VALUES}
-                        labels={WING_LABELS}
-                      />
-                    </TableCell>
-
-                    <TableCell>
-                      <EnumCell<RoomType>
-                        room={room}
-                        field="room_type"
-                        value={room.room_type}
-                        options={ROOM_TYPE_VALUES}
-                        labels={ROOM_TYPE_LABELS}
-                      />
-                    </TableCell>
-
-                    <TableCell>
-                      <EnumCell<CapacityType>
-                        room={room}
-                        field="capacity_type"
-                        value={room.capacity_type}
-                        options={CAPACITY_VALUES}
-                        labels={CAPACITY_LABELS}
-                      />
                     </TableCell>
 
                     <TableCell className="text-right">
@@ -1039,31 +1025,20 @@ const RoomsAdminPage = () => {
                     </TableCell>
 
                     <TableCell className="text-center">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          aria-label={`Edit ${room.display_name}`}
-                          onClick={() => openEditRoom(room)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          aria-label={`Delete ${room.display_name}`}
-                          onClick={() => setPendingDelete(room)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label={`Edit ${room.display_name}`}
+                        onClick={() => openEditRoom(room)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -1135,15 +1110,15 @@ const RoomsAdminPage = () => {
                 <Label>Room type</Label>
                 <Select
                   value={editForm.room_type}
-                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v as RoomType }))}
+                  onValueChange={(v) => setEditForm((f) => ({ ...f, room_type: v }))}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROOM_TYPE_VALUES.map((t) => (
+                    {roomTypeValues.map((t) => (
                       <SelectItem key={t} value={t}>
-                        {ROOM_TYPE_LABELS[t]}
+                        {roomTypeLabels[t] ?? t}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1209,7 +1184,7 @@ const RoomsAdminPage = () => {
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent className="sm:max-w-md print-sans">
             <DialogHeader>
-              <DialogTitle>Add room</DialogTitle>
+              <DialogTitle>Add Room</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
@@ -1252,15 +1227,17 @@ const RoomsAdminPage = () => {
                 <Label>Room type</Label>
                 <Select
                   value={newRoom.room_type}
-                  onValueChange={(v) => setNewRoom((f) => ({ ...f, room_type: v as RoomType }))}
+                  onValueChange={(v) =>
+                    setNewRoom((f) => ({ ...f, room_type: v as RoomType }))
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROOM_TYPE_VALUES.map((t) => (
+                    {roomTypeValues.map((t) => (
                       <SelectItem key={t} value={t}>
-                        {ROOM_TYPE_LABELS[t]}
+                        {roomTypeLabels[t] ?? t}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1346,31 +1323,6 @@ const RoomsAdminPage = () => {
           </DialogContent>
         </Dialog>
 
-        <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete room?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This cannot be undone. If bookings reference this room, deletion will fail.
-                {pendingDelete ? (
-                  <>
-                    {" "}
-                    <span className="font-medium text-foreground">{pendingDelete.display_name}</span>
-                  </>
-                ) : null}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={confirmDelete}
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </main>
     </>
   );
