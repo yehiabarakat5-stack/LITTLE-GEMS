@@ -85,6 +85,9 @@ import {
   splitFacilityAndPlaceholderRooms,
 } from "@/lib/boardingUnknownKennel";
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
+import { BoardingCalendarBookingChip } from "@/components/boarding/BoardingCalendarBookingChip";
+import { DEFAULT_BOARDING_CALENDAR_STATUS_COLORS } from "@/lib/boardingCalendarStatusColors";
+import { useBoardingStatusColors } from "@/hooks/useBoardingStatusColors";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
 import { resolveBoardingRate } from "@/lib/boardingPricing";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
@@ -1152,6 +1155,7 @@ export function DogBoardingCalendar({
   // mutations
   const createBooking = useCreateBooking();
   const updateBooking = useUpdateBooking();
+  const { data: statusColors = DEFAULT_BOARDING_CALENDAR_STATUS_COLORS } = useBoardingStatusColors();
 
   const { data: transportRates = [] } = useQuery({
     queryKey: ["pricing", "transport_zones", "boarding"],
@@ -1642,33 +1646,20 @@ export function DogBoardingCalendar({
           const chipPlaceholder = isPlaceholder || isImportPlaceholderBooking(booking);
 
           return (
-            <div
+            <BoardingCalendarBookingChip
               key={dayStr}
-              style={{
-                minWidth: DAY_COL_W * span - 4,
-                width: DAY_COL_W * span - 4,
-                marginLeft: 2,
-                marginRight: 2,
+              booking={booking}
+              label={label}
+              span={span}
+              dayColWidth={DAY_COL_W}
+              statusColors={statusColors}
+              isPlaceholder={chipPlaceholder}
+              placeholderClassName={IMPORT_PLACEHOLDER_STATUS_CLASS}
+              onOpen={() => openBookingDetail(booking)}
+              onCancelled={() => {
+                if (detailBooking?.id === booking.id) setDetailBooking(null);
               }}
-              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
-                cursor-pointer truncate z-10 select-none border border-dashed
-                ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
-              onClick={() => openBookingDetail(booking)}
-            >
-              <span className="truncate min-w-0 flex-1">{label || booking.booking_ref || "—"}</span>
-              {bookingAnyPetHasAlerts(booking) ? (
-                <TriangleAlert
-                  className="h-3.5 w-3.5 shrink-0 text-orange-100 drop-shadow-sm"
-                  aria-label="Pet alert"
-                />
-              ) : null}
-              {booking.booking_pets.length > 1 && (
-                <span className="shrink-0 opacity-80">+{booking.booking_pets.length - 1}</span>
-              )}
-              {bookingBelongingsCount(booking) > 0 ? (
-                <Luggage className="h-3 w-3 shrink-0 opacity-90" aria-hidden />
-              ) : null}
-            </div>
+            />
           );
         })}
       </div>
@@ -2674,7 +2665,7 @@ export function DogBoardingCalendar({
                   )}
 
                   {/* ── Cancel Booking ── */}
-                  {(detailBooking.status === "confirmed" || detailBooking.status === "enquiry") && (
+                  {detailBooking.status !== "cancelled" && (
                     <Button
                       variant="outline"
                       className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
@@ -2915,6 +2906,7 @@ function CatBoardingCalendar({
 
   const createBookingMut = useCreateBooking();
   const updateBooking = useUpdateBooking();
+  const { data: statusColors = DEFAULT_BOARDING_CALENDAR_STATUS_COLORS } = useBoardingStatusColors();
 
   const { data: catTransportRates = [] } = useQuery({
     queryKey: ["pricing", "transport_zones", "boarding"],
@@ -3354,22 +3346,20 @@ function CatBoardingCalendar({
           const chipPlaceholder = isPlaceholder || isImportPlaceholderBooking(booking);
 
           return (
-            <div
+            <BoardingCalendarBookingChip
               key={dayStr}
-              style={{ minWidth: DAY_COL_W * span - 4, width: DAY_COL_W * span - 4, marginLeft: 2, marginRight: 2 }}
-              className={`relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1 cursor-pointer truncate z-10 select-none border border-dashed ${chipPlaceholder ? IMPORT_PLACEHOLDER_STATUS_CLASS : STATUS_CLASSES[booking.status]}`}
-              onClick={() => openBookingDetail(booking)}
-            >
-              <span className="truncate min-w-0 flex-1">{label}</span>
-              {bookingAnyPetHasAlerts(booking) ? (
-                <TriangleAlert
-                  className="h-3.5 w-3.5 shrink-0 text-orange-100 drop-shadow-sm"
-                  aria-label="Pet alert"
-                />
-              ) : null}
-              {booking.booking_pets.length > 1 && <span className="shrink-0 opacity-80">+{booking.booking_pets.length - 1}</span>}
-              {bookingBelongingsCount(booking) > 0 ? <Luggage className="h-3 w-3 shrink-0 opacity-90" aria-hidden /> : null}
-            </div>
+              booking={booking}
+              label={label}
+              span={span}
+              dayColWidth={DAY_COL_W}
+              statusColors={statusColors}
+              isPlaceholder={chipPlaceholder}
+              placeholderClassName={IMPORT_PLACEHOLDER_STATUS_CLASS}
+              onOpen={() => openBookingDetail(booking)}
+              onCancelled={() => {
+                if (detailBooking?.id === booking.id) setDetailBooking(null);
+              }}
+            />
           );
         })}
       </div>
@@ -4073,7 +4063,7 @@ function CatBoardingCalendar({
                       <Button type="button" variant="outline" className="w-full" onClick={() => { setBelongingsReadOnly(true); setCheckInSheetOpen(true); }}><Eye className="mr-2 h-4 w-4" />View Belongings</Button>
                     </div>
                   )}
-                  {(detailBooking.status === "confirmed" || detailBooking.status === "enquiry") && (
+                  {detailBooking.status !== "cancelled" && (
                     <Button variant="outline" className="w-full text-destructive border-destructive/40 hover:bg-destructive/10" disabled={updateBooking.isPending} onClick={() => updateBooking.mutate({ id: detailBooking.id, status: "cancelled" }, { onSuccess: () => { toast.success("Booking cancelled"); setDetailBooking(null); }, onError: (err) => toast.error(err.message) })}>
                       {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Cancel Booking
                     </Button>

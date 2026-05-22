@@ -15,7 +15,8 @@ INSERT INTO public.system_context (key, content)
 VALUES
   ('business_rules', ''),
   ('query_guidelines', ''),
-  ('write_guidelines', '')
+  ('write_guidelines', ''),
+  ('boarding_calendar_status_colors', '')
 ON CONFLICT (key) DO NOTHING;
 
 ALTER TABLE public.system_context ENABLE ROW LEVEL SECURITY;
