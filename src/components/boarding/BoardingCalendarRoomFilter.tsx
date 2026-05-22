@@ -164,3 +164,25 @@ export function calendarRoomRowClassName(highlightRoomId: string | null, roomId:
     highlightRoomId === roomId && "bg-primary/5 ring-2 ring-inset ring-primary/50",
   );
 }
+
+export function BoardingCalendarRoomCountFooter({
+  roomColWidth,
+  daysWidth,
+  count,
+}: {
+  roomColWidth: number;
+  daysWidth: number;
+  count: number;
+}) {
+  return (
+    <div className="flex border-t border-border bg-muted/30">
+      <div
+        style={{ minWidth: roomColWidth, width: roomColWidth }}
+        className="shrink-0 border-r border-border px-3 py-2 text-xs font-medium text-muted-foreground"
+      >
+        {count} room{count !== 1 ? "s" : ""} total
+      </div>
+      <div style={{ minWidth: daysWidth, width: daysWidth }} aria-hidden="true" />
+    </div>
+  );
+}

@@ -87,6 +87,7 @@ import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKenne
 import { BoardingCalendarBookingChip } from "@/components/boarding/BoardingCalendarBookingChip";
 import {
   BoardingCalendarRoomFilter,
+  BoardingCalendarRoomCountFooter,
   calendarRoomRowClassName,
   useCalendarRoomScroll,
 } from "@/components/boarding/BoardingCalendarRoomFilter";
@@ -1875,6 +1876,12 @@ export function DogBoardingCalendar({
                   </Button>
                 </div>
               ) : null}
+
+              <BoardingCalendarRoomCountFooter
+                roomColWidth={roomColWidth}
+                daysWidth={DAY_COL_W * DAYS}
+                count={orderedCalendarRooms.length + dogPlaceholderRooms.length}
+              />
             </div>
           )}
         </div>
@@ -3594,6 +3601,12 @@ function CatBoardingCalendar({
                   </Button>
                 </div>
               ) : null}
+
+              <BoardingCalendarRoomCountFooter
+                roomColWidth={roomColWidth}
+                daysWidth={DAY_COL_W * DAYS}
+                count={orderedCalendarRooms.length + catPlaceholderRooms.length}
+              />
             </div>
           )}
         </div>
