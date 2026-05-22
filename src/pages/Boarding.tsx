@@ -13,8 +13,9 @@ import {
 import TopBar from "@/components/dashboard/TopBar";
 import {
   useBookings,
-  useBoardingCalendarBookings,
+  useBoardingPageData,
   useRooms,
+  type BoardingPageData,
   useCreateBooking,
   useUpdateBooking,
   isAssessmentRequiredError,
@@ -221,6 +222,40 @@ function groupRoomsByWing(rooms: Room[]): Map<string, Room[]> {
     map.get(wing)!.push(r);
   }
   return map;
+}
+
+/** Wing section order without listing the same wing twice (fixes unassigned duplicate rows). */
+function wingKeysForDisplay(
+  roomsByWing: Map<string, Room[]>,
+  wingOrder: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  const add = (wing: string) => {
+    if (seen.has(wing)) return;
+    seen.add(wing);
+    keys.push(wing);
+  };
+  for (const w of wingOrder) add(w);
+  add(UNASSIGNED_WING);
+  for (const w of roomsByWing.keys()) add(w);
+  return keys;
+}
+
+function flattenRoomsFromWingMap(
+  roomsByWing: Map<string, Room[]>,
+  wingOrder: readonly string[],
+): Room[] {
+  const seenIds = new Set<string>();
+  const out: Room[] = [];
+  for (const wing of wingKeysForDisplay(roomsByWing, wingOrder)) {
+    for (const room of roomsByWing.get(wing) ?? []) {
+      if (seenIds.has(room.id)) continue;
+      seenIds.add(room.id);
+      out.push(room);
+    }
+  }
+  return out;
 }
 
 function RoomColumnResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
@@ -1046,11 +1081,18 @@ const BLANK_FORM: NewBookingForm = {
   dog_size: DEFAULT_DOG_SIZE,
 };
 
+export type BoardingCalendarSharedData = Pick<
+  BoardingPageData,
+  "rooms" | "bookings" | "isLoading"
+>;
+
 export type DogBoardingCalendarProps = {
   windowStart: Date;
   onWindowStartChange: React.Dispatch<React.SetStateAction<Date>>;
   /** Hub renders the shared week toolbar */
   suppressToolbar?: boolean;
+  /** When set, avoids duplicate rooms/bookings fetches from the hub */
+  sharedData?: BoardingCalendarSharedData;
 };
 
 // ─── dog boarding calendar (no TopBar — used inside Boarding hub) ─────────────
@@ -1058,6 +1100,7 @@ export function DogBoardingCalendar({
   windowStart,
   onWindowStartChange,
   suppressToolbar,
+  sharedData,
 }: DogBoardingCalendarProps) {
   const navigate = useNavigate();
   const today = new Date();
@@ -1069,8 +1112,14 @@ export function DogBoardingCalendar({
 
   // data
   const queryClient = useQueryClient();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBoardingCalendarBookings(startStr, endStr);
-  const { data: rooms = [], isLoading: roomsLoading } = useRooms();
+  const internalData = useBoardingPageData(startStr, endStr, {
+    fetchBookings: !sharedData,
+  });
+  const rooms = sharedData?.rooms ?? internalData.rooms;
+  const bookings = sharedData?.bookings ?? internalData.bookings;
+  const dataLoading = sharedData?.isLoading ?? internalData.isLoading;
+  const roomsLoading = dataLoading;
+  const bookingsLoading = dataLoading;
   const { roomColWidth, onRoomColResizeStart } = useResizableRoomColumnWidth();
   const [visibleRoomLimit, setVisibleRoomLimit] = useState(CALENDAR_ROOMS_BATCH);
 
@@ -1312,15 +1361,10 @@ export function DogBoardingCalendar({
   // rooms grouped by wing (facility only; placeholders in UnknownKennel section)
   const roomsByWing = useMemo(() => groupRoomsByWing(assignableDogRooms), [assignableDogRooms]);
 
-  const orderedCalendarRooms = useMemo(() => {
-    const extraWings = [...roomsByWing.keys()].filter((w) => !WING_ORDER.includes(w));
-    const wings = [...WING_ORDER, UNASSIGNED_WING, ...extraWings];
-    const out: Room[] = [];
-    for (const wing of wings) {
-      out.push(...(roomsByWing.get(wing) ?? []));
-    }
-    return out;
-  }, [roomsByWing]);
+  const orderedCalendarRooms = useMemo(
+    () => flattenRoomsFromWingMap(roomsByWing, WING_ORDER),
+    [roomsByWing],
+  );
 
   const visibleCalendarRooms = useMemo(
     () => orderedCalendarRooms.slice(0, visibleRoomLimit),
@@ -1703,7 +1747,7 @@ export function DogBoardingCalendar({
               </div>
 
               {/* Wing groups + room rows */}
-              {[...WING_ORDER, UNASSIGNED_WING, ...Array.from(calendarRoomsByWing.keys()).filter((w) => !WING_ORDER.includes(w) && w !== UNASSIGNED_WING)].map((wing) => {
+              {wingKeysForDisplay(calendarRoomsByWing, WING_ORDER).map((wing) => {
                 const wingRooms = calendarRoomsByWing.get(wing) ?? [];
                 if (wingRooms.length === 0) return null;
                 return (
@@ -1984,7 +2028,7 @@ export function DogBoardingCalendar({
                     <CommandInput placeholder="Search room name, number, or wing..." />
                     <CommandList>
                       <CommandEmpty>No rooms found.</CommandEmpty>
-                      {[...WING_ORDER, ...Array.from(roomsByWing.keys()).filter((w) => !WING_ORDER.includes(w))].map((wing) => {
+                      {wingKeysForDisplay(roomsByWing, WING_ORDER).map((wing) => {
                         const wingRooms = roomsByWing.get(wing) ?? [];
                         if (wingRooms.length === 0) return null;
                         const wingLabel = WING_LABELS[wing] ?? formatSlugLabel(wing);
@@ -2771,12 +2815,14 @@ type CatBoardingCalendarProps = {
   windowStart: Date;
   onWindowStartChange: React.Dispatch<React.SetStateAction<Date>>;
   suppressToolbar?: boolean;
+  sharedData?: BoardingCalendarSharedData;
 };
 
 function CatBoardingCalendar({
   windowStart,
   onWindowStartChange,
   suppressToolbar,
+  sharedData,
 }: CatBoardingCalendarProps) {
   const navigate = useNavigate();
   const today = new Date();
@@ -2786,8 +2832,14 @@ function CatBoardingCalendar({
   const endStr = toDateStr(windowEnd);
 
   const queryClient = useQueryClient();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBoardingCalendarBookings(startStr, endStr);
-  const { data: roomsAll = [], isLoading: roomsLoading } = useRooms();
+  const internalData = useBoardingPageData(startStr, endStr, {
+    fetchBookings: !sharedData,
+  });
+  const roomsAll = sharedData?.rooms ?? internalData.rooms;
+  const bookings = sharedData?.bookings ?? internalData.bookings;
+  const dataLoading = sharedData?.isLoading ?? internalData.isLoading;
+  const roomsLoading = dataLoading;
+  const bookingsLoading = dataLoading;
   const { roomColWidth, onRoomColResizeStart } = useResizableRoomColumnWidth();
   const [visibleRoomLimit, setVisibleRoomLimit] = useState(CALENDAR_ROOMS_BATCH);
 
@@ -4278,7 +4330,17 @@ function BoardingHubPage() {
   const [occupancyOpen, setOccupancyOpen] = useState(false);
   const [occupancyDate, setOccupancyDate] = useState(todayStr);
 
-  const { data: facilityRooms = [] } = useRooms();
+  const calendarStartStr = toDateStr(windowStart);
+  const calendarEndStr = toDateStr(windowEnd);
+  const boardingPageData = useBoardingPageData(calendarStartStr, calendarEndStr, {
+    fetchBookings: viewMode === "calendar",
+  });
+  const facilityRooms = boardingPageData.rooms;
+  const calendarSharedData: BoardingCalendarSharedData = {
+    rooms: boardingPageData.rooms,
+    bookings: boardingPageData.bookings,
+    isLoading: boardingPageData.isLoading,
+  };
 
   const { data: occRaw = [], isFetching: occLoading } = useQuery({
     queryKey: ["boarding", "occupancy-bookings", occupancyDate, species],
@@ -4544,12 +4606,14 @@ function BoardingHubPage() {
               windowStart={windowStart}
               onWindowStartChange={setWindowStart}
               suppressToolbar
+              sharedData={calendarSharedData}
             />
           ) : (
             <CatBoardingCalendar
               windowStart={windowStart}
               onWindowStartChange={setWindowStart}
               suppressToolbar
+              sharedData={calendarSharedData}
             />
           )
         ) : (

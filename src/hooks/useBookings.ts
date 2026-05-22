@@ -46,9 +46,24 @@ const BOOKING_BASE_SELECT =
 const BOOKING_DETAIL_SELECT =
   `${BOOKING_BASE_SELECT}, booking_items(count)`;
 
-/** Calendar grid — booking fields + relations, without nested rooms(*) per row. */
+/** Boarding calendar — no rooms(*) join (room comes from useRooms); slim pet embed. */
 const BOOKING_CALENDAR_SELECT =
-  `*, owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts)), booking_items(count)`;
+  `id, booking_ref, room_id, owner_id, status, check_in_date, check_out_date, booking_type, notes, do_not_move, pickup_required, dropoff_required, actual_check_in_at, actual_check_out_at, dog_size, camera_link, staff_id, is_extension, is_free_upgrade, created_at, updated_at, owners(first_name, last_name, other_notes), booking_pets(pet_id, feeding_notes, medication_notes, special_instructions, pets(name, other_notes, feeding_instructions, medications, special_alerts)), booking_items(count)`;
+
+const BOOKING_CALENDAR_SELECT_FALLBACK = BOOKING_CALENDAR_SELECT.replace(
+  ", booking_items(count)",
+  "",
+);
+
+/** Columns needed by the boarding grid + room picker (not full room row). */
+const ROOMS_BOARDING_SELECT =
+  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active, notes, pricing_category";
+
+const boardingQueryDefaults = {
+  staleTime: 60_000,
+  gcTime: 5 * 60_000,
+  refetchOnWindowFocus: false,
+} as const;
 
 /** Payload accepted by useCreateBooking — booking fields + pet_ids to link */
 export type CreateBookingPayload = Omit<BookingInsert, "id" | "created_at" | "updated_at"> & {
@@ -108,39 +123,84 @@ export function useBookings(startDate: string, endDate: string) {
   });
 }
 
-/** Boarding calendar — lighter payload (no rooms(*) join); cached per date window. */
-export function useBoardingCalendarBookings(startDate: string, endDate: string) {
-  return useQuery({
-    queryKey: [...queryKeys.bookings(startDate, endDate), "calendar"] as const,
-    enabled: !!startDate && !!endDate,
-    staleTime: 30_000,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select(BOOKING_CALENDAR_SELECT)
-        .lte("check_in_date", endDate)
-        .gte("check_out_date", startDate)
-        .neq("status", "cancelled")
-        .order("check_in_date", { ascending: true });
+async function fetchBoardingCalendarBookings(
+  startDate: string,
+  endDate: string,
+): Promise<BookingWithDetails[]> {
+  const run = (select: string, boardingOnly: boolean) => {
+    let q = supabase
+      .from("bookings")
+      .select(select)
+      .lte("check_in_date", endDate)
+      .gte("check_out_date", startDate)
+      .neq("status", "cancelled")
+      .order("check_in_date", { ascending: true });
+    if (boardingOnly) {
+      q = q.eq("booking_type", "boarding");
+    }
+    return q;
+  };
 
-      if (error) {
-        if (error.message?.includes("booking_items")) {
-          const fallbackSelect = BOOKING_CALENDAR_SELECT.replace(", booking_items(count)", "");
-          const { data: d2, error: e2 } = await supabase
-            .from("bookings")
-            .select(fallbackSelect)
-            .lte("check_in_date", endDate)
-            .gte("check_out_date", startDate)
-            .neq("status", "cancelled")
-            .order("check_in_date", { ascending: true });
-          if (e2) throw e2;
-          return d2 as BookingWithDetails[];
-        }
-        throw error;
-      }
-      return data as BookingWithDetails[];
-    },
+  const { data, error } = await run(BOOKING_CALENDAR_SELECT, true);
+  if (!error) return data as BookingWithDetails[];
+
+  if (error.message?.includes("booking_items")) {
+    const { data: d2, error: e2 } = await run(BOOKING_CALENDAR_SELECT_FALLBACK, true);
+    if (!e2) return d2 as BookingWithDetails[];
+    if (e2) throw e2;
+  }
+
+  if (error.message?.includes("booking_type")) {
+    const { data: d3, error: e3 } = await run(BOOKING_CALENDAR_SELECT, false);
+    if (!e3) return d3 as BookingWithDetails[];
+  }
+
+  throw error;
+}
+
+/** Boarding calendar window — optimized vs full {@link useBookings}. */
+export function useBoardingCalendarBookings(
+  startDate: string,
+  endDate: string,
+  fetchEnabled = true,
+) {
+  return useQuery({
+    queryKey: [...queryKeys.bookings(startDate, endDate), "boarding", "calendar"] as const,
+    enabled: fetchEnabled && !!startDate && !!endDate,
+    ...boardingQueryDefaults,
+    queryFn: () => fetchBoardingCalendarBookings(startDate, endDate),
   });
+}
+
+export type BoardingPageData = {
+  rooms: Room[];
+  bookings: BookingWithDetails[];
+  isLoading: boolean;
+  isFetching: boolean;
+  error: Error | null;
+};
+
+/**
+ * Single hook for /boarding — one rooms query + one bookings query (MSH pattern, shared cache).
+ */
+export function useBoardingPageData(
+  startDate: string,
+  endDate: string,
+  options?: { fetchBookings?: boolean },
+): BoardingPageData {
+  const fetchBookings = options?.fetchBookings ?? true;
+  const roomsQuery = useRooms();
+  const bookingsQuery = useBoardingCalendarBookings(startDate, endDate, fetchBookings);
+
+  return {
+    rooms: roomsQuery.data ?? [],
+    bookings: bookingsQuery.data ?? [],
+    isLoading:
+      roomsQuery.isLoading || (fetchBookings ? bookingsQuery.isLoading : false),
+    isFetching:
+      roomsQuery.isFetching || (fetchBookings ? bookingsQuery.isFetching : false),
+    error: (roomsQuery.error ?? bookingsQuery.error) as Error | null,
+  };
 }
 
 /** Past and upcoming stays for a customer profile (includes cancelled). */
@@ -219,21 +279,46 @@ export function usePetBookings(petId: string) {
   });
 }
 
+function dedupeRoomsById(rooms: Room[]): Room[] {
+  const seen = new Set<string>();
+  const out: Room[] = [];
+  for (const room of rooms) {
+    if (seen.has(room.id)) continue;
+    seen.add(room.id);
+    out.push(room);
+  }
+  return out;
+}
+
 /** Active rooms — single shared query for boarding hub + calendars (matches MSH). */
 export function useRooms() {
   return useQuery({
     queryKey: queryKeys.rooms(),
-    staleTime: 60_000,
+    ...boardingQueryDefaults,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("rooms")
-        .select("*")
+        .select(ROOMS_BOARDING_SELECT)
         .eq("is_active", true)
         .order("wing", { ascending: true })
         .order("room_number", { ascending: true });
 
-      if (error) throw error;
-      return data as Room[];
+      if (error) {
+        if (error.message?.includes("pricing_category")) {
+          const { data: d2, error: e2 } = await supabase
+            .from("rooms")
+            .select(
+              "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active, notes",
+            )
+            .eq("is_active", true)
+            .order("wing", { ascending: true })
+            .order("room_number", { ascending: true });
+          if (e2) throw e2;
+          return dedupeRoomsById(d2 as Room[]);
+        }
+        throw error;
+      }
+      return dedupeRoomsById(data as Room[]);
     },
   });
 }
