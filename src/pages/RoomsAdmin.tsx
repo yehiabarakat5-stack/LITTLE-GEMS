@@ -330,6 +330,13 @@ function formatRoomMutationError(err: unknown): string {
 
 function roomsSchemaMigrationHint(message: string): string | null {
   const m = message.toLowerCase();
+  if (
+    m.includes("row-level security") ||
+    m.includes("permission denied") ||
+    m.includes("42501")
+  ) {
+    return "Staff cannot read rooms due to RLS. Run sql/rooms-authenticated-rls.sql (or migration 20260522130000_rooms_authenticated_rls.sql) in the Supabase SQL Editor, then refresh.";
+  }
   if (m.includes("label_color")) {
     return "The database is missing column rooms.label_color. Apply sql/add-rooms-label-color.sql in the Supabase SQL Editor, then refresh the app.";
   }
@@ -465,7 +472,7 @@ function roomToEditForm(room: Room): RoomEditForm {
 }
 
 const RoomsAdminPage = () => {
-  const { data: allRooms, isLoading, isError, error } = useAllRooms();
+  const { data: allRooms, isLoading, isFetching, isError, error, refetch } = useAllRooms();
   const updateRoom = useUpdateRoom();
   const createRoom = useCreateRoom();
   const roomTypesQ = useRoomTypesQuery();
@@ -493,7 +500,8 @@ const RoomsAdminPage = () => {
     return { roomTypeValues: values, roomTypeLabels: labels };
   }, [roomTypesQ.data, allRooms]);
 
-  const rooms = allRooms;
+  const rooms = allRooms ?? [];
+  const roomsLoading = isLoading || (isFetching && rooms.length === 0);
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("__all__");
   const [typeFilterSearch, setTypeFilterSearch] = useState("");
@@ -836,6 +844,11 @@ const RoomsAdminPage = () => {
             <p className="text-sm text-muted-foreground mt-1">
               Click any cell to edit inline. Status shows occupied rooms for today. Use the pencil
               icon for full room details.
+              {rooms.length > 0 && (
+                <span className="ml-1 font-medium text-foreground">
+                  ({rooms.length} room{rooms.length === 1 ? "" : "s"} loaded)
+                </span>
+              )}
             </p>
           </div>
           <Button type="button" onClick={() => setAddOpen(true)}>
@@ -844,7 +857,7 @@ const RoomsAdminPage = () => {
           </Button>
         </div>
 
-        {isLoading ? (
+        {roomsLoading ? (
           <div className="space-y-2">
             {[1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} className="h-12 w-full" />
@@ -853,13 +866,29 @@ const RoomsAdminPage = () => {
         ) : isError ? (
           <Alert variant="destructive">
             <AlertTitle>Could not load rooms</AlertTitle>
-            <AlertDescription>
-              {roomsSchemaMigrationHint(formatRoomMutationError(error)) ??
-                formatRoomMutationError(error)}
+            <AlertDescription className="space-y-3">
+              <p>
+                {roomsSchemaMigrationHint(formatRoomMutationError(error)) ??
+                  formatRoomMutationError(error)}
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>
+                Retry
+              </Button>
             </AlertDescription>
           </Alert>
-        ) : !rooms || rooms.length === 0 ? (
-          <p className="text-muted-foreground">No rooms found.</p>
+        ) : rooms.length === 0 ? (
+          <div className="space-y-3">
+            <p className="text-muted-foreground">No rooms found.</p>
+            <p className="text-sm text-muted-foreground max-w-xl">
+              If rows exist in the Supabase SQL editor but not here, the app user may be blocked by
+              row-level security. Run{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">sql/rooms-authenticated-rls.sql</code>{" "}
+              in the SQL editor, then refresh this page.
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </div>
         ) : (
           <>
           <div className="mb-4 flex flex-wrap items-center gap-3">

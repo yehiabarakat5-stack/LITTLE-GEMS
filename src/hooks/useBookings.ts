@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { useAuth } from "@/contexts/AuthContext";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
+import { fetchAllRooms } from "@/lib/roomsApi";
 
 type Booking = Database["public"]["Tables"]["bookings"]["Row"];
 type BookingInsert = Database["public"]["Tables"]["bookings"]["Insert"];
@@ -172,37 +174,22 @@ export function usePetBookings(petId: string) {
 }
 
 export function useRooms() {
+  const { session } = useAuth();
   return useQuery({
     queryKey: queryKeys.rooms(),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("rooms")
-        .select("*")
-        .eq("is_active", true)
-        .order("wing", { ascending: true })
-        .order("room_number", { ascending: true });
-
-      if (error) throw error;
-      return data as Room[];
-    },
+    enabled: !!session,
+    queryFn: () => fetchAllRooms(true),
   });
 }
 
 /** Fetches ALL rooms regardless of active status — used by the admin table */
 export function useAllRooms() {
+  const { session } = useAuth();
   return useQuery({
     queryKey: ["rooms", "all"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("rooms")
-        .select("*")
-        .order("display_name", { ascending: true })
-        .order("wing", { ascending: true })
-        .order("room_number", { ascending: true });
-
-      if (error) throw error;
-      return data as Room[];
-    },
+    enabled: !!session,
+    queryFn: () => fetchAllRooms(false),
+    refetchOnMount: true,
   });
 }
 
@@ -224,11 +211,8 @@ export function useUpdateRoom() {
       if (error) throw error;
       return data as Room;
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData<Room[]>(["rooms", "all"], (old) =>
-        old ? old.map((r) => (r.id === data.id ? data : r)) : old,
-      );
-      queryClient.invalidateQueries({ queryKey: queryKeys.rooms() });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rooms"] });
     },
   });
 }
