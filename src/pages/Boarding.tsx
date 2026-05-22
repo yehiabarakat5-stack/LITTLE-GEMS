@@ -80,12 +80,15 @@ import { CheckOutSheet } from "@/components/CheckOutSheet";
 import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
 import { buildRoomDayBookingMaps } from "@/lib/boardingCalendarGrid";
 import {
-  IMPORT_PLACEHOLDER_STATUS_CLASS,
   isImportPlaceholderBooking,
   splitFacilityAndPlaceholderRooms,
 } from "@/lib/boardingUnknownKennel";
 import { UnknownKennelCalendarSection } from "@/components/boarding/UnknownKennelCalendarSection";
 import { BoardingCalendarBookingChip } from "@/components/boarding/BoardingCalendarBookingChip";
+import {
+  BoardingBookingStatusActions,
+  BoardingRealRoomPicker,
+} from "@/components/boarding/BoardingBookingStatusActions";
 import { DEFAULT_BOARDING_CALENDAR_STATUS_COLORS } from "@/lib/boardingCalendarStatusColors";
 import { useBoardingStatusColors } from "@/hooks/useBoardingStatusColors";
 import { formatBookingCell, bookingBelongingsCount, createBookingInvoice, ownerDisplayName } from "@/lib/bookingUtils";
@@ -122,7 +125,6 @@ import {
   Plus,
   Loader2,
   ExternalLink,
-  Eye,
   Luggage,
   LayoutGrid,
   Printer,
@@ -289,6 +291,20 @@ function formatSlugLabel(value: string | null | undefined, fallback = "—"): st
 function formatStatusLabel(status: string | null | undefined): string {
   if (!status) return "—";
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function mergeBookingIntoDetail(
+  prev: BookingWithDetails | null,
+  updated: BookingWithDetails,
+  facilityRooms: Room[],
+): BookingWithDetails | null {
+  if (!prev || prev.id !== updated.id) return prev;
+  const room =
+    updated.rooms ??
+    (updated.room_id !== prev.room_id
+      ? facilityRooms.find((r) => r.id === updated.room_id) ?? prev.rooms
+      : prev.rooms);
+  return { ...prev, ...updated, rooms: room ?? null };
 }
 
 function normalizeRoomWing(wing: string | null | undefined): string {
@@ -1366,6 +1382,21 @@ export function DogBoardingCalendar({
 
   const assignableDogRooms = dogFacilityRooms;
 
+  const patchDetailBooking = (
+    payload: Parameters<ReturnType<typeof useUpdateBooking>["mutate"]>[0],
+    onSuccessMessage?: string,
+    closeOnSuccess = false,
+  ) => {
+    updateBooking.mutate(payload, {
+      onSuccess: (data) => {
+        setDetailBooking((prev) => mergeBookingIntoDetail(prev, data as BookingWithDetails, assignableDogRooms));
+        if (onSuccessMessage) toast.success(onSuccessMessage);
+        if (closeOnSuccess) setDetailBooking(null);
+      },
+      onError: (err) => toast.error(extractErrorMessage(err)),
+    });
+  };
+
   // rooms grouped by wing (facility only; placeholders in UnknownKennel section)
   const roomsByWing = useMemo(() => groupRoomsByWing(assignableDogRooms), [assignableDogRooms]);
 
@@ -1662,7 +1693,6 @@ export function DogBoardingCalendar({
               dayColWidth={DAY_COL_W}
               statusColors={statusColors}
               isPlaceholder={chipPlaceholder}
-              placeholderClassName={IMPORT_PLACEHOLDER_STATUS_CLASS}
               onOpen={() => openBookingDetail(booking)}
               onCancelled={() => {
                 if (detailBooking?.id === booking.id) setDetailBooking(null);
@@ -2546,10 +2576,26 @@ export function DogBoardingCalendar({
                 />
 
                 {/* Room */}
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
-                  <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
+                    <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
+                  </div>
+                  {isImportPlaceholderBooking(detailBooking) ? (
+                    <BoardingRealRoomPicker
+                      rooms={assignableDogRooms}
+                      value={detailBooking.room_id}
+                      disabled={updateBooking.isPending}
+                      wingOrder={WING_ORDER}
+                      wingLabels={WING_LABELS}
+                      roomsByWing={roomsByWing}
+                      formatWingLabel={(wing) => WING_LABELS[wing] ?? formatSlugLabel(wing)}
+                      onSelect={(roomId) =>
+                        patchDetailBooking({ id: detailBooking.id, room_id: roomId }, "Room updated")
+                      }
+                    />
+                  ) : null}
                 </div>
 
                 {/* Dates */}
@@ -2640,62 +2686,54 @@ export function DogBoardingCalendar({
 
                 {/* Actions */}
                 <div className="space-y-3">
-
-                  {detailBooking.status === "confirmed" && (
-                    <Button
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => {
-                        setBelongingsReadOnly(false);
-                        setCheckInSheetOpen(true);
-                      }}
-                    >
-                      Check In
-                    </Button>
-                  )}
-
-                  {detailBooking.status === "checked_in" && (
-                    <div className="flex flex-col gap-2">
-                      <Button className="w-full" variant="outline" onClick={() => setCheckOutSheetOpen(true)}>
-                        Check Out
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => {
-                          setBelongingsReadOnly(true);
-                          setCheckInSheetOpen(true);
-                        }}
-                      >
-                        <Eye className="mr-2 h-4 w-4" />
-                        View Belongings
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* ── Cancel Booking ── */}
-                  {detailBooking.status !== "cancelled" && (
-                    <Button
-                      variant="outline"
-                      className="w-full text-destructive border-destructive/40 hover:bg-destructive/10"
-                      disabled={updateBooking.isPending}
-                      onClick={() =>
-                        updateBooking.mutate(
-                          { id: detailBooking.id, status: "cancelled" },
-                          {
-                            onSuccess: () => {
-                              toast.success("Booking cancelled");
-                              setDetailBooking(null);
-                            },
-                            onError: (err) => toast.error(err.message),
-                          }
-                        )
-                      }
-                    >
-                      {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Cancel Booking
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() =>
+                      window.open(
+                        `/print/kennel-card/${detailBooking.id}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  >
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print Kennel Card
+                  </Button>
+                  <BoardingBookingStatusActions
+                    bookingStatus={detailBooking.status}
+                    statusColors={statusColors}
+                    isPending={updateBooking.isPending}
+                    onFollowUp={() =>
+                      patchDetailBooking({ id: detailBooking.id, status: "enquiry" }, "Marked for follow up")
+                    }
+                    onCheckInStatus={() =>
+                      patchDetailBooking({ id: detailBooking.id, status: "confirmed" }, "Booking confirmed")
+                    }
+                    onStart={() => {
+                      setBelongingsReadOnly(false);
+                      setCheckInSheetOpen(true);
+                    }}
+                    onUndoStart={() =>
+                      patchDetailBooking(
+                        {
+                          id: detailBooking.id,
+                          status: "confirmed",
+                          actual_check_in_at: null,
+                        },
+                        "Check-in undone",
+                      )
+                    }
+                    onCompleted={() => setCheckOutSheetOpen(true)}
+                    onTakePayment={() => setCheckOutSheetOpen(true)}
+                    onViewBelongings={() => {
+                      setBelongingsReadOnly(true);
+                      setCheckInSheetOpen(true);
+                    }}
+                    onCancelBooking={() =>
+                      patchDetailBooking({ id: detailBooking.id, status: "cancelled" }, "Booking cancelled", true)
+                    }
+                  />
                 </div>
               </div>
             </>
@@ -2861,6 +2899,29 @@ function CatBoardingCalendar({
     });
     return map;
   }, [catFacilityRooms]);
+
+  const catPickerRoomsByWing = useMemo(() => {
+    const map = new Map<string, Room[]>();
+    for (const tier of CAT_TIER_ORDER) {
+      map.set(tier, roomsByTier.get(tier) ?? []);
+    }
+    return map;
+  }, [roomsByTier]);
+
+  const patchCatDetailBooking = (
+    payload: Parameters<ReturnType<typeof useUpdateBooking>["mutate"]>[0],
+    onSuccessMessage?: string,
+    closeOnSuccess = false,
+  ) => {
+    updateBooking.mutate(payload, {
+      onSuccess: (data) => {
+        setDetailBooking((prev) => mergeBookingIntoDetail(prev, data as BookingWithDetails, catFacilityRooms));
+        if (onSuccessMessage) toast.success(onSuccessMessage);
+        if (closeOnSuccess) setDetailBooking(null);
+      },
+      onError: (err) => toast.error(extractErrorMessage(err)),
+    });
+  };
 
   const orderedCalendarRooms = useMemo(() => {
     const out: Room[] = [];
@@ -3367,7 +3428,6 @@ function CatBoardingCalendar({
               dayColWidth={DAY_COL_W}
               statusColors={statusColors}
               isPlaceholder={chipPlaceholder}
-              placeholderClassName={IMPORT_PLACEHOLDER_STATUS_CLASS}
               onOpen={() => openBookingDetail(booking)}
               onCancelled={() => {
                 if (detailBooking?.id === booking.id) setDetailBooking(null);
@@ -4034,10 +4094,26 @@ function CatBoardingCalendar({
                   )}
                 </div>
                 <BookingProfileNotes ownerOtherNotes={detailBooking.owners?.other_notes} pets={detailBooking.booking_pets.map((bp) => ({ name: bp.pets?.name ?? "Pet", otherNotes: bp.pets?.other_notes }))} />
-                <div className="space-y-1">
-                  <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
-                  <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <p className="text-xs uppercase text-muted-foreground font-medium">Room</p>
+                    <p className="text-sm font-medium">{detailBooking.rooms?.room_number ?? detailBooking.rooms?.display_name ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{detailBooking.rooms?.room_type?.replace(/_/g, " ") ?? ""} · {detailBooking.rooms?.capacity_type ?? ""} · {detailBooking.rooms?.wing?.replace(/_/g, " ") ?? ""}</p>
+                  </div>
+                  {isImportPlaceholderBooking(detailBooking) ? (
+                    <BoardingRealRoomPicker
+                      rooms={catFacilityRooms}
+                      value={detailBooking.room_id}
+                      disabled={updateBooking.isPending}
+                      wingOrder={CAT_TIER_ORDER}
+                      wingLabels={CAT_TIER_LABELS}
+                      roomsByWing={catPickerRoomsByWing}
+                      formatWingLabel={(tier) => CAT_TIER_LABELS[tier as CatRoomType] ?? tier}
+                      onSelect={(roomId) =>
+                        patchCatDetailBooking({ id: detailBooking.id, room_id: roomId }, "Room updated")
+                      }
+                    />
+                  ) : null}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -4069,18 +4145,40 @@ function CatBoardingCalendar({
                     <Printer className="mr-2 h-4 w-4" />
                     Print Kennel Card
                   </Button>
-                  {detailBooking.status === "confirmed" && <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setBelongingsReadOnly(false); setCheckInSheetOpen(true); }}>Check In</Button>}
-                  {detailBooking.status === "checked_in" && (
-                    <div className="flex flex-col gap-2">
-                      <Button className="w-full" variant="outline" onClick={() => setCheckOutSheetOpen(true)}>Check Out</Button>
-                      <Button type="button" variant="outline" className="w-full" onClick={() => { setBelongingsReadOnly(true); setCheckInSheetOpen(true); }}><Eye className="mr-2 h-4 w-4" />View Belongings</Button>
-                    </div>
-                  )}
-                  {detailBooking.status !== "cancelled" && (
-                    <Button variant="outline" className="w-full text-destructive border-destructive/40 hover:bg-destructive/10" disabled={updateBooking.isPending} onClick={() => updateBooking.mutate({ id: detailBooking.id, status: "cancelled" }, { onSuccess: () => { toast.success("Booking cancelled"); setDetailBooking(null); }, onError: (err) => toast.error(err.message) })}>
-                      {updateBooking.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Cancel Booking
-                    </Button>
-                  )}
+                  <BoardingBookingStatusActions
+                    bookingStatus={detailBooking.status}
+                    statusColors={statusColors}
+                    isPending={updateBooking.isPending}
+                    onFollowUp={() =>
+                      patchCatDetailBooking({ id: detailBooking.id, status: "enquiry" }, "Marked for follow up")
+                    }
+                    onCheckInStatus={() =>
+                      patchCatDetailBooking({ id: detailBooking.id, status: "confirmed" }, "Booking confirmed")
+                    }
+                    onStart={() => {
+                      setBelongingsReadOnly(false);
+                      setCheckInSheetOpen(true);
+                    }}
+                    onUndoStart={() =>
+                      patchCatDetailBooking(
+                        {
+                          id: detailBooking.id,
+                          status: "confirmed",
+                          actual_check_in_at: null,
+                        },
+                        "Check-in undone",
+                      )
+                    }
+                    onCompleted={() => setCheckOutSheetOpen(true)}
+                    onTakePayment={() => setCheckOutSheetOpen(true)}
+                    onViewBelongings={() => {
+                      setBelongingsReadOnly(true);
+                      setCheckInSheetOpen(true);
+                    }}
+                    onCancelBooking={() =>
+                      patchCatDetailBooking({ id: detailBooking.id, status: "cancelled" }, "Booking cancelled", true)
+                    }
+                  />
                 </div>
               </div>
             </>

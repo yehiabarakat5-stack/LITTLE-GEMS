@@ -15,11 +15,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   boardingCalendarChipStyle,
+  boardingStatusButtonStyle,
   resolveBoardingCalendarStatusKey,
   type BoardingCalendarStatusColors,
 } from "@/lib/boardingCalendarStatusColors";
+import { isImportPlaceholderBooking } from "@/lib/boardingUnknownKennel";
 import { bookingAnyPetHasAlerts } from "@/lib/petAlerts";
 import { bookingBelongingsCount } from "@/lib/bookingUtils";
+import { extractErrorMessage } from "@/lib/errors";
 
 type Props = {
   booking: BookingWithDetails;
@@ -27,7 +30,6 @@ type Props = {
   span: number;
   dayColWidth: number;
   statusColors: BoardingCalendarStatusColors;
-  placeholderClassName?: string;
   isPlaceholder?: boolean;
   onOpen: () => void;
   onCancelled?: () => void;
@@ -39,21 +41,22 @@ export function BoardingCalendarBookingChip({
   span,
   dayColWidth,
   statusColors,
-  placeholderClassName,
   isPlaceholder,
   onOpen,
   onCancelled,
 }: Props) {
   const updateBooking = useUpdateBooking();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
+  const chipPlaceholder = isPlaceholder || isImportPlaceholderBooking(booking);
   const statusKey = resolveBoardingCalendarStatusKey({
     status: booking.status,
     bookingItemsCount: booking.booking_items?.[0]?.count,
+    isImportPlaceholder: chipPlaceholder,
   });
-  const chipStyle = isPlaceholder
-    ? undefined
-    : boardingCalendarChipStyle(statusColors, statusKey);
+  const chipStyle = boardingCalendarChipStyle(statusColors, statusKey);
+  const inlineStyle = boardingStatusButtonStyle(chipStyle, hovered);
 
   const handleCancel = () => {
     updateBooking.mutate(
@@ -64,7 +67,7 @@ export function BoardingCalendarBookingChip({
           setConfirmOpen(false);
           onCancelled?.();
         },
-        onError: (err) => toast.error(err.message),
+        onError: (err) => toast.error(extractErrorMessage(err)),
       },
     );
   };
@@ -77,12 +80,13 @@ export function BoardingCalendarBookingChip({
           width: dayColWidth * span - 4,
           marginLeft: 2,
           marginRight: 2,
-          ...chipStyle,
+          ...inlineStyle,
         }}
-        className={`group relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
-          cursor-pointer truncate z-10 select-none border border-dashed
-          ${isPlaceholder ? placeholderClassName ?? "" : "hover:brightness-95"}`}
+        className="group relative h-10 mt-1 rounded text-xs font-medium px-2 flex items-center gap-1
+          cursor-pointer truncate z-10 select-none border border-dashed"
         onClick={onOpen}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
         <span className="truncate min-w-0 flex-1 pr-4">{label || booking.booking_ref || "—"}</span>
         {bookingAnyPetHasAlerts(booking) ? (
