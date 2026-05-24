@@ -79,6 +79,7 @@ import { CheckInSheet } from "@/components/CheckInSheet";
 import { CheckOutSheet } from "@/components/CheckOutSheet";
 import { CAT_BOARDING_SECTION_ID } from "@/lib/boardingLabels";
 import { buildRoomDayBookingMaps } from "@/lib/boardingCalendarGrid";
+import { sortRoomsBySortOrder } from "@/lib/roomSortOrder";
 import {
   isImportPlaceholderBooking,
   splitFacilityAndPlaceholderRooms,
@@ -236,6 +237,9 @@ function groupRoomsByWing(rooms: Room[]): Map<string, Room[]> {
     if (!map.has(wing)) map.set(wing, []);
     map.get(wing)!.push(r);
   }
+  for (const [wing, wingRooms] of map) {
+    map.set(wing, sortRoomsBySortOrder(wingRooms));
+  }
   return map;
 }
 
@@ -255,22 +259,6 @@ function wingKeysForDisplay(
   add(UNASSIGNED_WING);
   for (const w of roomsByWing.keys()) add(w);
   return keys;
-}
-
-function flattenRoomsFromWingMap(
-  roomsByWing: Map<string, Room[]>,
-  wingOrder: readonly string[],
-): Room[] {
-  const seenIds = new Set<string>();
-  const out: Room[] = [];
-  for (const wing of wingKeysForDisplay(roomsByWing, wingOrder)) {
-    for (const room of roomsByWing.get(wing) ?? []) {
-      if (seenIds.has(room.id)) continue;
-      seenIds.add(room.id);
-      out.push(room);
-    }
-  }
-  return out;
 }
 
 function RoomColumnResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
@@ -1407,18 +1395,13 @@ export function DogBoardingCalendar({
   const roomsByWing = useMemo(() => groupRoomsByWing(assignableDogRooms), [assignableDogRooms]);
 
   const orderedCalendarRooms = useMemo(
-    () => flattenRoomsFromWingMap(roomsByWing, WING_ORDER),
-    [roomsByWing],
+    () => sortRoomsBySortOrder(assignableDogRooms),
+    [assignableDogRooms],
   );
 
   const visibleCalendarRooms = useMemo(
     () => orderedCalendarRooms.slice(0, visibleRoomLimit),
     [orderedCalendarRooms, visibleRoomLimit],
-  );
-
-  const calendarRoomsByWing = useMemo(
-    () => groupRoomsByWing(visibleCalendarRooms),
-    [visibleCalendarRooms],
   );
 
   const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
@@ -1804,53 +1787,34 @@ export function DogBoardingCalendar({
                 })}
               </div>
 
-              {/* Wing groups + room rows */}
-              {wingKeysForDisplay(calendarRoomsByWing, WING_ORDER).map((wing) => {
-                const wingRooms = calendarRoomsByWing.get(wing) ?? [];
-                if (wingRooms.length === 0) return null;
-                return (
-                  <div key={wing}>
-                    {/* Wing header */}
-                    <div
-                      className="flex sticky left-0 bg-slate-50 border-b border-t border-border"
-                      style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}
+              {/* Room rows (sort_order ascending) */}
+              {visibleCalendarRooms.map((room) => (
+                <div
+                  key={room.id}
+                  data-calendar-room-id={room.id}
+                  className={calendarRoomRowClassName(highlightRoomId, room.id)}
+                >
+                  {/* Room label */}
+                  <div
+                    style={{ minWidth: roomColWidth, width: roomColWidth }}
+                    className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
+                  >
+                    <span
+                      className="truncate"
+                      title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
                     >
-                      <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {WING_LABELS[wing] ?? formatSlugLabel(wing)}
-                      </div>
-                    </div>
-
-                    {/* Room rows */}
-                    {wingRooms.map((room) => (
-                      <div
-                        key={room.id}
-                        data-calendar-room-id={room.id}
-                        className={calendarRoomRowClassName(highlightRoomId, room.id)}
-                      >
-                        {/* Room label */}
-                        <div
-                          style={{ minWidth: roomColWidth, width: roomColWidth }}
-                          className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card"
-                        >
-                          <span
-                            className="truncate"
-                            title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
-                          >
-                            <span className="font-medium">{formatRoomPickerLabel(room)}</span>
-                            {formatRoomPickerMeta(room) ? (
-                              <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">
-                                {formatRoomPickerMeta(room)}
-                              </span>
-                            ) : null}
-                          </span>
-                        </div>
-                        {/* Day cells */}
-                        {renderRoomRow(room.id)}
-                      </div>
-                    ))}
+                      <span className="font-medium">{formatRoomPickerLabel(room)}</span>
+                      {formatRoomPickerMeta(room) ? (
+                        <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">
+                          {formatRoomPickerMeta(room)}
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
-                );
-              })}
+                  {/* Day cells */}
+                  {renderRoomRow(room.id)}
+                </div>
+              ))}
 
               <UnknownKennelCalendarSection
                 species="dog"
@@ -2936,6 +2900,9 @@ function CatBoardingCalendar({
       const rt = r.room_type as CatRoomType;
       if (map.has(rt)) map.get(rt)!.push(r);
     });
+    for (const [tier, tierRooms] of map) {
+      map.set(tier, sortRoomsBySortOrder(tierRooms));
+    }
     return map;
   }, [catFacilityRooms]);
 
@@ -2962,28 +2929,15 @@ function CatBoardingCalendar({
     });
   };
 
-  const orderedCalendarRooms = useMemo(() => {
-    const out: Room[] = [];
-    for (const tier of CAT_TIER_ORDER) {
-      out.push(...(roomsByTier.get(tier) ?? []));
-    }
-    return out;
-  }, [roomsByTier]);
+  const orderedCalendarRooms = useMemo(
+    () => sortRoomsBySortOrder(catFacilityRooms),
+    [catFacilityRooms],
+  );
 
   const visibleCalendarRooms = useMemo(
     () => orderedCalendarRooms.slice(0, visibleRoomLimit),
     [orderedCalendarRooms, visibleRoomLimit],
   );
-
-  const calendarRoomsByTier = useMemo(() => {
-    const map = new Map<CatRoomType, Room[]>();
-    CAT_TIER_ORDER.forEach((t) => map.set(t, []));
-    visibleCalendarRooms.forEach((r) => {
-      const rt = r.room_type as CatRoomType;
-      if (map.has(rt)) map.get(rt)!.push(r);
-    });
-    return map;
-  }, [visibleCalendarRooms]);
 
   const hasMoreCalendarRooms = visibleRoomLimit < orderedCalendarRooms.length;
 
@@ -3543,39 +3497,28 @@ function CatBoardingCalendar({
                 })}
               </div>
 
-              {CAT_TIER_ORDER.map((tier) => {
-                const tierRooms = calendarRoomsByTier.get(tier) ?? [];
-                if (tierRooms.length === 0) return null;
-                return (
-                  <div key={tier}>
-                    <div className="flex sticky left-0 bg-violet-50 border-b border-t border-border" style={{ minWidth: roomColWidth + DAY_COL_W * DAYS }}>
-                      <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-violet-900">{CAT_TIER_LABELS[tier]}</div>
-                    </div>
-                    {tierRooms.map((room) => (
-                      <div
-                        key={room.id}
-                        data-calendar-room-id={room.id}
-                        className={calendarRoomRowClassName(highlightRoomId, room.id)}
-                      >
-                        <div style={{ minWidth: roomColWidth, width: roomColWidth }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
-                          <span
-                            className="truncate"
-                            title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
-                          >
-                            <span className="font-medium">{formatRoomPickerLabel(room)}</span>
-                            {formatRoomPickerMeta(room) ? (
-                              <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">
-                                {formatRoomPickerMeta(room)}
-                              </span>
-                            ) : null}
-                          </span>
-                        </div>
-                        {renderRoomRow(room.id)}
-                      </div>
-                    ))}
+              {visibleCalendarRooms.map((room) => (
+                <div
+                  key={room.id}
+                  data-calendar-room-id={room.id}
+                  className={calendarRoomRowClassName(highlightRoomId, room.id)}
+                >
+                  <div style={{ minWidth: roomColWidth, width: roomColWidth }} className="shrink-0 border-r border-b border-border flex items-center px-3 text-sm text-foreground bg-card">
+                    <span
+                      className="truncate"
+                      title={`${formatRoomPickerLabel(room)}${formatRoomPickerMeta(room) ? ` (${formatRoomPickerMeta(room)})` : ""}`}
+                    >
+                      <span className="font-medium">{formatRoomPickerLabel(room)}</span>
+                      {formatRoomPickerMeta(room) ? (
+                        <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">
+                          {formatRoomPickerMeta(room)}
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
-                );
-              })}
+                  {renderRoomRow(room.id)}
+                </div>
+              ))}
 
               <UnknownKennelCalendarSection
                 species="cat"

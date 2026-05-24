@@ -5,6 +5,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { withoutDogSizeColumn } from "@/lib/dogSizeNotes";
 import { extractErrorMessage, isMissingPostgrestColumnError } from "@/lib/errors";
+import { sortRoomsBySortOrder } from "@/lib/roomSortOrder";
 import {
   createRoomsAdminRoom,
   fetchRoomsForAdmin,
@@ -58,7 +59,7 @@ const BOOKING_CALENDAR_SELECT_FALLBACK = BOOKING_CALENDAR_SELECT.replace(
 
 /** Columns needed by the boarding grid + room picker (not full room row). */
 const ROOMS_BOARDING_SELECT =
-  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active, notes, pricing_category";
+  "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active, notes, pricing_category, sort_order";
 
 const boardingQueryDefaults = {
   staleTime: 60_000,
@@ -335,25 +336,32 @@ export function useRooms() {
         .from("rooms")
         .select(ROOMS_BOARDING_SELECT)
         .eq("is_active", true)
-        .order("wing", { ascending: true })
-        .order("room_number", { ascending: true });
+        .order("sort_order", { ascending: true });
 
       if (error) {
+        if (isMissingPostgrestColumnError(error, "sort_order")) {
+          const { data: d2, error: e2 } = await supabase
+            .from("rooms")
+            .select(
+              "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active, notes, pricing_category",
+            )
+            .eq("is_active", true);
+          if (e2) throw e2;
+          return dedupeRoomsById(sortRoomsBySortOrder(d2 as Room[]));
+        }
         if (error.message?.includes("pricing_category")) {
           const { data: d2, error: e2 } = await supabase
             .from("rooms")
             .select(
               "id, display_name, room_number, wing, room_type, capacity_type, max_pets, is_active, notes",
             )
-            .eq("is_active", true)
-            .order("wing", { ascending: true })
-            .order("room_number", { ascending: true });
+            .eq("is_active", true);
           if (e2) throw e2;
-          return dedupeRoomsById(d2 as Room[]);
+          return dedupeRoomsById(sortRoomsBySortOrder(d2 as Room[]));
         }
         throw error;
       }
-      return dedupeRoomsById(data as Room[]);
+      return dedupeRoomsById(sortRoomsBySortOrder(data as Room[]));
     },
   });
 }

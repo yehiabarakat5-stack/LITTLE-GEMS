@@ -1700,6 +1700,7 @@ export type Database = {
           pricing_size_tier: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
+          sort_order: number | null
           street_name: string | null
           wing: Database["public"]["Enums"]["room_wing"]
         }
@@ -1723,6 +1724,7 @@ export type Database = {
           pricing_size_tier?: string | null
           room_number: string
           room_type: Database["public"]["Enums"]["room_type"]
+          sort_order?: number | null
           street_name?: string | null
           wing: Database["public"]["Enums"]["room_wing"]
         }
@@ -1746,6 +1748,7 @@ export type Database = {
           pricing_size_tier?: string | null
           room_number?: string
           room_type?: Database["public"]["Enums"]["room_type"]
+          sort_order?: number | null
           street_name?: string | null
           wing?: Database["public"]["Enums"]["room_wing"]
         }

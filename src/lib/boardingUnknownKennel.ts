@@ -1,4 +1,5 @@
 import type { Database } from "@/integrations/supabase/types";
+import { sortRoomsBySortOrder } from "@/lib/roomSortOrder";
 
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
 
@@ -132,9 +133,7 @@ export function groupPlaceholderRoomsByTier(rooms: Room[], species: "dog" | "cat
     .map((tier) => ({
       tier,
       label: labels[tier as keyof typeof labels] ?? tier,
-      rooms: (map.get(tier) ?? []).sort((a, b) =>
-        a.display_name.localeCompare(b.display_name),
-      ),
+      rooms: sortRoomsBySortOrder(map.get(tier) ?? []),
     }))
     .filter((g) => g.rooms.length > 0);
 }
