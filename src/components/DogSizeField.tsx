@@ -1,24 +1,24 @@
 import { Label } from "@/components/ui/label";
 import {
   DOG_SIZE_FORM_OPTIONS,
+  GROOMING_DOG_SIZE_FORM_OPTIONS,
   type DogSizeFormValue,
+  type GroomingDogSizeFormValue,
 } from "@/lib/dogSizeForm";
 
-type DogSizeOption = DogSizeFormValue;
-
-export function DogSizeField({
+export function DogSizeField<T extends string = DogSizeFormValue>({
   value,
   onChange,
   name,
   label = "Dog size",
-  options = DOG_SIZE_FORM_OPTIONS,
+  options = DOG_SIZE_FORM_OPTIONS as readonly T[],
 }: {
-  value: DogSizeOption | null;
-  onChange: (v: DogSizeOption) => void;
+  value: T | null;
+  onChange: (v: T) => void;
   /** Unique `name` for the radio group (required when multiple groups exist on one page). */
   name: string;
   label?: string;
-  options?: readonly DogSizeOption[];
+  options?: readonly T[];
 }) {
   return (
     <div className="space-y-2">
@@ -42,5 +42,28 @@ export function DogSizeField({
         ))}
       </div>
     </div>
+  );
+}
+
+/** Grooming intake — Little Gems only accepts small and medium dogs. */
+export function GroomingDogSizeField({
+  value,
+  onChange,
+  name,
+  label = "Dog size",
+}: {
+  value: GroomingDogSizeFormValue | null;
+  onChange: (v: GroomingDogSizeFormValue) => void;
+  name: string;
+  label?: string;
+}) {
+  return (
+    <DogSizeField
+      name={name}
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={GROOMING_DOG_SIZE_FORM_OPTIONS}
+    />
   );
 }
