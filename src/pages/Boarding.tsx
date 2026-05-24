@@ -121,8 +121,7 @@ import { getBookingRoomOverlapErrorMessage } from "@/lib/bookingAvailabilityErro
 import { extractErrorMessage } from "@/lib/errors";
 import {
   DEFAULT_DOG_SIZE,
-  LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS,
-  type LittleGemsDogSizeFormValue,
+  type DogSizeFormValue,
 } from "@/lib/dogSizeForm";
 import {
   Check,
@@ -1073,7 +1072,7 @@ type NewBookingForm = {
     }
   >;
   /** Client-selected size (Small / Medium). */
-  dog_size: LittleGemsDogSizeFormValue;
+  dog_size: DogSizeFormValue;
 };
 
 const BLANK_FORM: NewBookingForm = {
@@ -2202,7 +2201,6 @@ export function DogBoardingCalendar({
                 name="boarding-dog-new-booking"
                 value={form.dog_size}
                 onChange={(v) => setForm((f) => ({ ...f, dog_size: v }))}
-                options={LITTLE_GEMS_DOG_SIZE_FORM_OPTIONS}
               />
             </div>
 

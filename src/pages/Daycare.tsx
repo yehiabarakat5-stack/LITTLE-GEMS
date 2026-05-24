@@ -812,7 +812,7 @@ function PlannerTab() {
     transport_zone: "dubai_shared" as TransportZone,
     logged_by: "",
     remark: "",
-    dog_size: DEFAULT_DOG_SIZE as DogSizeFormValue,
+    dog_size: DEFAULT_DOG_SIZE,
   });
   const [isSubmittingCheckIn, setIsSubmittingCheckIn] = useState(false);
 

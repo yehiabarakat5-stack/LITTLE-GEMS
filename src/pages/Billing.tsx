@@ -1972,7 +1972,7 @@ function PricingTab() {
             <CardHeader className="pb-3">
               <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Grooming (v2) — Package × Size Grid</CardTitle>
               <p className="text-xs text-muted-foreground font-normal pt-1">
-                Live 5 × 4 grid (Grande, Bijoux, Deshedding Long/Smooth, Bath & Blow across S/M/L/XL).
+                Live 5 × 2 grid (Grande, Bijoux, Deshedding Long/Smooth, Bath & Blow across Small and Medium).
               </p>
             </CardHeader>
             <CardContent className="p-0">

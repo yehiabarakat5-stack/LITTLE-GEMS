@@ -12,18 +12,21 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  LITTLE_GEMS_PET_SIZE_CATEGORIES,
+  LITTLE_GEMS_PET_SIZE_LABELS,
+  type LittleGemsPetSizeCategory,
+} from "@/lib/dogSizeForm";
+import {
   type GroomingPackage,
-  type PetSize,
   useGroomingRates,
   useUpdateGroomingRate,
 } from "@/hooks/useGroomingRates";
 
-const SIZE_COLUMNS: { size: PetSize; label: string }[] = [
-  { size: "S", label: "Small (up to 10kg)" },
-  { size: "M", label: "Medium (10–20kg)" },
-  { size: "L", label: "Large (20–35kg)" },
-  { size: "XL", label: "X-Large (35kg+)" },
-];
+const SIZE_COLUMNS: { size: LittleGemsPetSizeCategory; label: string }[] =
+  LITTLE_GEMS_PET_SIZE_CATEGORIES.map((size) => ({
+    size,
+    label: LITTLE_GEMS_PET_SIZE_LABELS[size],
+  }));
 
 const PACKAGE_ROWS: { pkg: GroomingPackage; label: string }[] = [
   { pkg: "grande", label: "Grande (Full Groom)" },
@@ -73,7 +76,7 @@ export default function GroomingPricingGrid() {
     return latest ?? null;
   }, [data]);
 
-  const saveCell = (pkg: GroomingPackage, size: PetSize, rawValue: string) => {
+  const saveCell = (pkg: GroomingPackage, size: LittleGemsPetSizeCategory, rawValue: string) => {
     const key = `${pkg}:${size}`;
     if (timersRef.current[key]) {
       clearTimeout(timersRef.current[key]);

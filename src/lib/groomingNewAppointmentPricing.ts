@@ -1,5 +1,5 @@
 import type { GroomingService } from "@/lib/groomingCatalog";
-import type { LittleGemsDogSizeFormValue } from "@/lib/dogSizeForm";
+import type { DogSizeFormValue } from "@/lib/dogSizeForm";
 
 /** Checkbox `value`s used on the New Appointment form (pricing + primary resolution). */
 export type GroomingPricingCheckbox =
@@ -59,17 +59,17 @@ export function isGroomingPricingCheckbox(v: string): v is GroomingPricingCheckb
 
 const BATH_AND_BLOW_DRY_BASE_AED = 158;
 
-const PRICING_FULL_GROOM_OR_DESHED: Record<LittleGemsDogSizeFormValue, number> = {
+const PRICING_FULL_GROOM_OR_DESHED: Record<DogSizeFormValue, number> = {
   Small: 294,
   Medium: 336,
 };
 
-const PRICING_BATH_ONLY_BIJOU: Record<LittleGemsDogSizeFormValue, number> = {
+const PRICING_BATH_ONLY_BIJOU: Record<DogSizeFormValue, number> = {
   Small: 210,
   Medium: 242,
 };
 
-const PRICING_FULL_BATH: Record<LittleGemsDogSizeFormValue, number> = {
+const PRICING_FULL_BATH: Record<DogSizeFormValue, number> = {
   Small: 210,
   Medium: 263,
 };
@@ -144,7 +144,7 @@ export function groomingPricingCheckboxToDbService(cb: GroomingPricingCheckbox):
  */
 export function computeNewGroomingAppointmentOriginalAed(
   selectedServices: readonly string[],
-  dogSize: LittleGemsDogSizeFormValue | null,
+  dogSize: DogSizeFormValue | null,
   manualAddons?: ManualGroomingAddonAed | null,
 ): number | null {
   const selected = selectedServices.filter(isGroomingPricingCheckbox);

@@ -189,7 +189,7 @@ export type AddDaycareDayPayload = AttendancePayload & {
   pet_id:       string;
   owner_id:     string;
   package_id?:  string | null;
-  /** Client-selected size label (Small / Medium / Large / Extra Large). */
+  /** Client-selected size label (Small / Medium). */
   dog_size?: string | null;
 };
 

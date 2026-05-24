@@ -59,6 +59,7 @@ import { VetClinicCombobox } from "@/components/VetClinicCombobox";
 import { Search, Plus, Eye, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import { inferLittleGemsPetSizeCategory } from "@/lib/dogSizeForm";
 
 type MemberType = Database["public"]["Enums"]["member_type"];
 type OwnerInsert = Database["public"]["Tables"]["owners"]["Insert"];
@@ -128,14 +129,6 @@ const INITIAL_FORM: OwnerInsert = {
   always_same_room: false,
   camera_required: false,
 };
-
-function inferSizeCategory(weightKg: number | null): Database["public"]["Enums"]["pet_size_category"] | null {
-  if (weightKg == null || Number.isNaN(weightKg)) return null;
-  if (weightKg < 10) return "S";
-  if (weightKg < 20) return "M";
-  if (weightKg < 35) return "L";
-  return "XL";
-}
 
 const CustomersPage = () => {
   const navigate = useNavigate();
@@ -326,7 +319,7 @@ const CustomersPage = () => {
         date_of_birth: draft.date_of_birth || null,
         weight_kg: weight,
         assessment_status: "not_assessed",
-        size_category: inferSizeCategory(weight),
+        size_category: inferLittleGemsPetSizeCategory(weight),
       };
       const pet = await createPet.mutateAsync(payload);
       created.push({ id: pet.id, name: pet.name });
