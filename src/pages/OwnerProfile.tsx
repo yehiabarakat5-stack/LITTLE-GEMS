@@ -124,6 +124,7 @@ const MEMBER_BADGE_CLASSES: Record<MemberType, string> = {
   silver: "bg-blue-50 text-blue-700 border-blue-200",
   gold: "bg-amber-50 text-amber-700 border-amber-200",
   platinum: "bg-violet-50 text-violet-700 border-violet-200",
+  apc: "bg-emerald-50 text-emerald-700 border-emerald-200",
   "Non Member": "bg-slate-100 text-slate-600 border-slate-200",
 };
 
@@ -1800,6 +1801,7 @@ const OwnerProfilePage = () => {
                       <SelectItem value="silver">Silver</SelectItem>
                       <SelectItem value="gold">Gold</SelectItem>
                       <SelectItem value="platinum">Platinum</SelectItem>
+                      <SelectItem value="apc">APC</SelectItem>
                       <SelectItem value="Non Member">Non Member</SelectItem>
                     </SelectContent>
                   </Select>

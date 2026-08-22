@@ -2263,7 +2263,7 @@ export type Database = {
         | "outstanding"
         | "overdue"
         | "voided"
-      member_type: "standard" | "silver" | "gold" | "platinum" | "Non Member"
+      member_type: "standard" | "silver" | "gold" | "platinum" | "apc" | "Non Member"
       park_day_status: "open" | "closed" | "assessment_only"
       park_size: "small" | "big"
       payment_method: "wallet" | "card" | "cash"
@@ -2511,7 +2511,7 @@ export const Constants = {
         "overdue",
         "voided",
       ],
-      member_type: ["standard", "silver", "gold", "platinum", "Non Member"],
+      member_type: ["standard", "silver", "gold", "platinum", "apc", "Non Member"],
       park_day_status: ["open", "closed", "assessment_only"],
       park_size: ["small", "big"],
       payment_method: ["wallet", "card", "cash"],

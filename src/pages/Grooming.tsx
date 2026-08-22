@@ -11,7 +11,7 @@ import {
 import TopBar from "@/components/dashboard/TopBar";
 import { useAuth } from "@/contexts/AuthContext";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
-import { useOwners, useOwner } from "@/hooks/useOwners";
+import { useOwners, useOwner, useUpdateOwner } from "@/hooks/useOwners";
 import { usePets } from "@/hooks/usePets";
 import {
   useGroomingAppointments,
@@ -39,7 +39,7 @@ import {
   type GroomingWorkflowStatus,
 } from "@/lib/groomingWorkflow";
 import { grandTotalFromNet, invoiceDisplayTotals, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
-import { memberTierBadgeClassName, memberTierBadgeLabel, memberTierDiscountPct } from "@/lib/memberTier";
+import { memberTierDiscountPct } from "@/lib/memberTier";
 import {
   GROOMING_PAYMENT_METHOD_NONE,
   GROOMING_PAYMENT_METHOD_OPTIONS,
@@ -137,12 +137,24 @@ import {
   CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { Database } from "@/integrations/supabase/types";
 import { BookingProfileNotes } from "@/components/BookingProfileNotes";
 import { cn } from "@/lib/utils";
 import {
   labelForGroomingService,
   type GroomingService,
 } from "@/lib/groomingCatalog";
+
+type MemberType = Database["public"]["Enums"]["member_type"];
+
+const GROOMING_MEMBER_TYPE_OPTIONS: { value: MemberType; label: string }[] = [
+  { value: "standard", label: "Standard" },
+  { value: "silver", label: "Silver" },
+  { value: "gold", label: "Gold" },
+  { value: "platinum", label: "Platinum" },
+  { value: "apc", label: "APC" },
+  { value: "Non Member", label: "Non Member" },
+];
 
 const SERVICE_BADGE: Record<GroomingService, string> = {
   full_groom: "bg-purple-100 text-purple-800 border-purple-200",
@@ -758,10 +770,12 @@ const GroomingPage = () => {
     useGroomingGlobalSearch(historySearch);
 
   const createAppt = useCreateGroomingAppointment();
+  const updateOwner = useUpdateOwner();
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
+  const [formMemberType, setFormMemberType] = useState<MemberType>("standard");
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<GroomingServiceCheckbox[]>([
     "full_groom",
@@ -839,11 +853,20 @@ const GroomingPage = () => {
   }, [ownerId]);
 
   useEffect(() => {
+    if (!sheetOpen || !ownerId) {
+      if (!ownerId) setFormMemberType("standard");
+      return;
+    }
+    if (!ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
+    setFormMemberType(ownerForGroomingPref.member_type ?? "standard");
+  }, [sheetOpen, ownerId, ownerForGroomingPref?.id, ownerForGroomingPref?.member_type]);
+
+  useEffect(() => {
     if (!sheetOpen || !ownerId || !ownerForGroomingPref || ownerForGroomingPref.id !== ownerId) return;
     if (!discountAutoFromMemberRef.current) return;
-    const pct = memberTierDiscountPct(ownerForGroomingPref.member_type);
+    const pct = memberTierDiscountPct(formMemberType);
     setDiscountPct(pct > 0 ? String(pct) : "");
-  }, [sheetOpen, ownerId, ownerForGroomingPref?.id, ownerForGroomingPref?.member_type]);
+  }, [sheetOpen, ownerId, formMemberType, ownerForGroomingPref?.id]);
 
   useEffect(() => {
     if (!ownerId) {
@@ -1029,6 +1052,7 @@ const GroomingPage = () => {
     setVisitNotes("");
     setOwnerId(null);
     setOwnerLabel(null);
+    setFormMemberType("standard");
     setSelectedPetIds([]);
     setLinkBoarding(false);
     setBookingSearch("");
@@ -1226,6 +1250,11 @@ const GroomingPage = () => {
           pet_id: pid,
         });
         createdRows.push(appt);
+      }
+
+      const currentMemberType = ownerForGroomingPref?.member_type ?? null;
+      if (ownerId && currentMemberType !== formMemberType) {
+        await updateOwner.mutateAsync({ id: ownerId, member_type: formMemberType });
       }
 
       toast.success(
@@ -2345,20 +2374,37 @@ const GroomingPage = () => {
                   onClear={() => {
                     setOwnerId(null);
                     setOwnerLabel(null);
+                    setFormMemberType("standard");
                     setSelectedPetIds([]);
                   }}
                 />
-                {ownerForGroomingPref &&
-                ownerForGroomingPref.id === ownerId &&
-                memberTierBadgeLabel(ownerForGroomingPref.member_type) ? (
-                  <Badge
-                    variant="outline"
-                    className={`w-fit ${memberTierBadgeClassName(ownerForGroomingPref.member_type)}`}
-                  >
-                    {memberTierBadgeLabel(ownerForGroomingPref.member_type)}
-                  </Badge>
-                ) : null}
               </div>
+              {ownerId ? (
+                <div className="space-y-2">
+                  <Label htmlFor="grooming-member-type">Member type</Label>
+                  <Select
+                    value={formMemberType}
+                    onValueChange={(v) => {
+                      const next = v as MemberType;
+                      setFormMemberType(next);
+                      discountAutoFromMemberRef.current = true;
+                      const pct = memberTierDiscountPct(next);
+                      setDiscountPct(pct > 0 ? String(pct) : "");
+                    }}
+                  >
+                    <SelectTrigger id="grooming-member-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GROOMING_MEMBER_TYPE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
               {ownerId && pets.length === 0 && (
                 <p className="text-sm text-muted-foreground">Loading pets…</p>
               )}
