@@ -111,6 +111,7 @@ const MEMBER_BADGE: Record<MemberType, string> = {
   silver: "bg-blue-50 text-blue-700 border-blue-200",
   gold: "bg-amber-50 text-amber-700 border-amber-200",
   platinum: "bg-violet-50 text-violet-700 border-violet-200",
+  "Non Member": "bg-slate-100 text-slate-600 border-slate-200",
 };
 
 const TX_BADGE: Record<string, { label: string; className: string }> = {
