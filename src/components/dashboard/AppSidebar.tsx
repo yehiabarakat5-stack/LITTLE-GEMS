@@ -46,7 +46,7 @@ const AppSidebar = () => {
       <div className="flex h-16 items-center gap-2.5 px-5 border-b border-sidebar-border">
         <PawPrint className="h-6 w-6 text-sidebar-primary" />
         <span className="text-sm font-bold leading-tight tracking-tight text-sidebar-accent-foreground">
-          Little Gems by My Second Home
+          Coro Campus Little Gems
         </span>
       </div>
 

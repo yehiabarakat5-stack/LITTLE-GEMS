@@ -46,7 +46,7 @@ const LoginPage = () => {
           <div className="inline-flex flex-col items-center justify-center gap-2">
             <PawPrint className="h-8 w-8 text-primary" />
             <h1 className="text-xl font-bold tracking-tight text-foreground">
-              Little Gems by My Second Home
+              Coro Campus Little Gems
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">Staff Management Portal</p>

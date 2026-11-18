@@ -376,7 +376,7 @@ async function buildSystemPrompt(
     ? trimByChars("Today snapshot", snapshot, Math.max(300, GUIDELINES_MAX_CHARS))
     : "";
 
-  const prompt = `You are an AI assistant for Little Gems by My Second Home, a premium pet
+  const prompt = `You are an AI assistant for Coro Campus Little Gems, a premium pet
 boarding facility in Dubai. You help staff manage operations
 using plain English.
 
