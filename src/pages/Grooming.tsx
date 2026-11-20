@@ -120,6 +120,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -741,8 +742,9 @@ function AppointmentCard({
 }
 
 const GroomingPage = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [day, setDay] = useState(() => new Date());
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
 
   useEffect(() => {
     const d = searchParams.get("date");
@@ -756,8 +758,25 @@ const GroomingPage = () => {
     }
   }, [searchParams]);
 
+  const jumpToDate = (d: Date) => {
+    setDay(d);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("date", format(d, "yyyy-MM-dd"));
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const dateStr = format(day, "yyyy-MM-dd");
   const todayStr = format(new Date(), "yyyy-MM-dd");
+  const dubaiTodayDate = parse(
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date()),
+    "yyyy-MM-dd",
+    new Date(),
+  );
 
   const [groomingTab, setGroomingTab] = useState("day");
   const { data: dayAppointments = [], isLoading: dayLoading } =
@@ -1516,6 +1535,28 @@ const GroomingPage = () => {
             >
               Today
             </Button>
+            <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="icon" aria-label="Pick a date">
+                  <CalendarDays className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={day}
+                  defaultMonth={day}
+                  today={dubaiTodayDate}
+                  weekStartsOn={1}
+                  onSelect={(d) => {
+                    if (!d) return;
+                    jumpToDate(d);
+                    setDatePickerOpen(false);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="flex flex-wrap items-center gap-2 justify-end">
             <Button
