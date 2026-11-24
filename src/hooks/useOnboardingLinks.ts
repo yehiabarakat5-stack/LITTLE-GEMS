@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-export type OnboardingStage = "assessment" | "membership";
+export type OnboardingStage = "assessment" | "membership" | "pet_profile";
 
 export type OnboardingLink = {
   id: string;

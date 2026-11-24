@@ -223,6 +223,13 @@ export function SendProfileLinkDialog({ open, onOpenChange, ownerId, ownerName, 
                     <span className="block text-xs text-muted-foreground">Full profile, care details, Get to Know My Dog, consent and the joining fee. Reception verifies payment.</span>
                   </span>
                 </label>
+                <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${stage === "pet_profile" ? "border-primary" : ""}`}>
+                  <RadioGroupItem value="pet_profile" className="mt-0.5" />
+                  <span>
+                    <span className="block text-sm font-medium">Pet profile link</span>
+                    <span className="block text-xs text-muted-foreground">Get to Know My Dog form only, for an existing client's pet(s). No booking, no payment.</span>
+                  </span>
+                </label>
               </RadioGroup>
             </div>
 
@@ -263,16 +270,31 @@ export function SendProfileLinkDialog({ open, onOpenChange, ownerId, ownerName, 
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Close
               </Button>
-              <Button type="button" onClick={() => void generate()} disabled={create.isPending || (!ownerId && !phoneInput.trim() && !conversationId.trim())}>
+              <Button
+                type="button"
+                onClick={() => void generate()}
+                disabled={
+                  create.isPending ||
+                  (stage === "pet_profile"
+                    ? !ownerId && !phoneInput.trim()
+                    : !ownerId && !phoneInput.trim() && !conversationId.trim())
+                }
+              >
                 {create.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
-                {create.isPending ? "Reading chat & building link…" : "Generate link"}
+                {create.isPending
+                  ? stage === "pet_profile"
+                    ? "Building pet profile link…"
+                    : "Reading chat & building link…"
+                  : "Generate link"}
               </Button>
             </DialogFooter>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Link (valid 14 days)</Label>
+              <Label>
+                Link (valid {result.link.stage === "pet_profile" ? "7" : "14"} days)
+              </Label>
               <div className="flex gap-2">
                 <Input readOnly value={result.link.url} onFocus={(e) => e.currentTarget.select()} />
                 <CopyButton text={result.link.url} label="Copy" />
