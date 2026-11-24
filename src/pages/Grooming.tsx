@@ -145,6 +145,16 @@ import {
   labelForGroomingService,
   type GroomingService,
 } from "@/lib/groomingCatalog";
+import {
+  GroomingPetIdentitySubline,
+  GroomingPetPhoto,
+  GroomingPetStayBadges,
+} from "@/components/grooming/GroomingPetStayBadges";
+import {
+  stayForPetDate,
+  useGroomingPetStays,
+} from "@/hooks/useGroomingPetStays";
+import type { GroomingPetStayFlag } from "@/lib/groomingPetStay";
 
 type MemberType = Database["public"]["Enums"]["member_type"];
 
@@ -575,10 +585,12 @@ function GroomingOwnerSearch({
 
 function AppointmentCard({
   a,
+  stay,
   onPrint,
   onOpenActions,
 }: {
   a: GroomingAppointmentWithJoins;
+  stay?: GroomingPetStayFlag | null;
   onPrint: (appointmentId: string) => void;
   onOpenActions: (row: GroomingAppointmentWithJoins) => void;
 }) {
@@ -587,12 +599,7 @@ function AppointmentCard({
     : "—";
   const phone = a.owners?.phone ?? "";
   const petName = a.pets?.name ?? "—";
-  const breedWeight = [
-    a.pets?.breed,
-    a.pets?.weight_kg != null ? `${a.pets.weight_kg}kg` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const weightLabel = a.pets?.weight_kg != null ? `${a.pets.weight_kg}kg` : null;
 
   const duration = a.duration_minutes ?? 60;
   const { services: selectedServiceLabels, groomingDate } = parseGroomingMeta(a.notes);
@@ -627,6 +634,7 @@ function AppointmentCard({
 
           <div className="space-y-2 min-w-0" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <GroomingPetPhoto photoUrl={a.pets?.photo_url} name={petName} />
               <p className="text-xl font-bold truncate">{petName}</p>
               {petHasSpecialAlerts(parsePetSpecialAlerts(a.pets?.special_alerts)) ? (
                 <Badge
@@ -637,9 +645,15 @@ function AppointmentCard({
                 </Badge>
               ) : null}
             </div>
-            <p className="text-sm text-muted-foreground">
-              {breedWeight || "—"}
-            </p>
+            <GroomingPetIdentitySubline
+              breed={a.pets?.breed}
+              colour={a.pets?.colour}
+              ownerLastName={a.owners?.last_name}
+            />
+            {weightLabel ? (
+              <p className="text-xs text-muted-foreground">{weightLabel}</p>
+            ) : null}
+            <GroomingPetStayBadges stay={stay} />
             <p className="text-sm">
               <span className="font-medium">{ownerName}</span>
               {phone ? (
@@ -1378,6 +1392,14 @@ const GroomingPage = () => {
         .filter((a) => serviceMatches(a, serviceFilter, serviceSearch)),
     [dayAppointments, serviceFilter, serviceSearch],
   );
+  const stayLookupItems = useMemo(
+    () =>
+      filteredDayAppointments
+        .filter((a) => a.pet_id)
+        .map((a) => ({ petId: a.pet_id, date: a.appointment_date })),
+    [filteredDayAppointments],
+  );
+  const { data: stayByKey = {} } = useGroomingPetStays(stayLookupItems);
   const filteredHistory = useMemo(
     () =>
       sortedHistory.filter((a) =>
@@ -1638,6 +1660,7 @@ const GroomingPage = () => {
                   <AppointmentCard
                     key={a.id}
                     a={a}
+                    stay={stayForPetDate(stayByKey, a.pet_id, a.appointment_date)}
                     onOpenActions={setActionAppt}
                     onPrint={(appointmentId) =>
                       window.open(
@@ -1872,6 +1895,28 @@ const GroomingPage = () => {
           </SheetHeader>
           {actionAppt && (
             <div className="mt-6 flex flex-col gap-3">
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+                <GroomingPetPhoto
+                  photoUrl={actionAppt.pets?.photo_url}
+                  name={actionAppt.pets?.name ?? "Pet"}
+                  className="h-12 w-12"
+                />
+                <div className="min-w-0 space-y-1">
+                  <p className="font-semibold">{actionAppt.pets?.name ?? "Pet"}</p>
+                  <GroomingPetIdentitySubline
+                    breed={actionAppt.pets?.breed}
+                    colour={actionAppt.pets?.colour}
+                    ownerLastName={actionAppt.owners?.last_name}
+                  />
+                  <GroomingPetStayBadges
+                    stay={stayForPetDate(
+                      stayByKey,
+                      actionAppt.pet_id,
+                      actionAppt.appointment_date,
+                    )}
+                  />
+                </div>
+              </div>
               <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm flex flex-wrap items-center gap-2">
                 <span className="text-muted-foreground">Status</span>
                 <Badge

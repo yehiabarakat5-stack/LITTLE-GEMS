@@ -8,6 +8,14 @@ import {
   vatAmountFromNet,
   vatLineLabel,
 } from "@/lib/vatConfig";
+import {
+  fetchGroomingPetStayFlagsByDate,
+  formatGroomingBoardingStayLine,
+  formatGroomingDaycareStayLine,
+  groomingPetIdentityLine,
+  groomingPetStayKey,
+  type GroomingPetStayFlag,
+} from "@/lib/groomingPetStay";
 
 export type GroomingInvoiceMoney = {
   netExVat: number;
@@ -48,19 +56,22 @@ export type GroomingPrintRow = {
   pets: {
     name: string;
     breed: string | null;
+    colour?: string | null;
     size_category: "S" | "M" | "L" | "XL" | null;
     grooming_notes: string | null;
     medical_conditions: string | null;
+    photo_url?: string | null;
   } | null;
   bookings: {
     booking_ref: string | null;
   } | null;
+  stay?: GroomingPetStayFlag | null;
 };
 
 const GROOMING_APPOINTMENT_PRINT_SELECT = `
   id, appointment_date, appointment_time, duration_minutes, service, grooming_notes, notes, visit_notes, pet_id, owner_id, price, booking_id,
   owners(first_name, last_name, phone, phone2, email, address),
-  pets(name, breed, size_category, grooming_notes, medical_conditions),
+  pets(name, breed, colour, size_category, grooming_notes, medical_conditions, photo_url),
   bookings(booking_ref)
 `;
 
@@ -135,12 +146,13 @@ export async function fetchGroomingRowById(
   const row = data as GroomingPrintRow;
 
   const enriched = await enrichGroomingRows([row]);
+  const appointment = enriched.appointments[0] ?? row;
   return {
-    appointment: row,
-    previousGroomDate: enriched.previousByPetId[row.pet_id] ?? null,
+    appointment,
+    previousGroomDate: enriched.previousByPetId[appointment.pet_id] ?? null,
     invoiceMoney:
-      enriched.amountByAppointmentId[row.id] ??
-      (row.price != null ? groomingMoneyFromPrice(row.price) : null),
+      enriched.amountByAppointmentId[appointment.id] ??
+      (appointment.price != null ? groomingMoneyFromPrice(appointment.price) : null),
   };
 }
 
@@ -157,21 +169,27 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
   const petIds = Array.from(new Set(rows.map((r) => r.pet_id)));
   const appointmentIds = rows.map((r) => r.id);
 
-  const [{ data: previousRows, error: previousError }, { data: invoices, error: invoicesError }] =
-    await Promise.all([
-      supabase
-        .from("grooming_appointments")
-        .select("pet_id, appointment_date, status")
-        .in("pet_id", petIds)
-        .lt("appointment_date", minDate)
-        .neq("status", "cancelled")
-        .order("appointment_date", { ascending: false }),
-      supabase
-        .from("invoices")
-        .select("service_id, total_aed, total, vat_aed")
-        .eq("service_type", "grooming")
-        .in("service_id", appointmentIds),
-    ]);
+  const [
+    { data: previousRows, error: previousError },
+    { data: invoices, error: invoicesError },
+    stayByKey,
+  ] = await Promise.all([
+    supabase
+      .from("grooming_appointments")
+      .select("pet_id, appointment_date, status")
+      .in("pet_id", petIds)
+      .lt("appointment_date", minDate)
+      .neq("status", "cancelled")
+      .order("appointment_date", { ascending: false }),
+    supabase
+      .from("invoices")
+      .select("service_id, total_aed, total, vat_aed")
+      .eq("service_type", "grooming")
+      .in("service_id", appointmentIds),
+    fetchGroomingPetStayFlagsByDate(
+      rows.map((r) => ({ petId: r.pet_id, date: r.appointment_date })),
+    ),
+  ]);
 
   if (previousError) throw previousError;
   if (invoicesError) throw invoicesError;
@@ -192,7 +210,10 @@ async function enrichGroomingRows(rows: GroomingPrintRow[]): Promise<{
   }
 
   return {
-    appointments: rows,
+    appointments: rows.map((r) => ({
+      ...r,
+      stay: stayByKey[groomingPetStayKey(r.pet_id, r.appointment_date)] ?? null,
+    })),
     previousByPetId,
     amountByAppointmentId,
   };
@@ -360,9 +381,43 @@ export function GroomingSchedulePrintView({
                       <tr key={a.id} className="schedule-data-row">
                         <td className="schedule-td schedule-td-pet align-top">
                           <div className="schedule-pet-lines text-neutral-900">
-                            <div className="text-base font-bold leading-tight">
-                              {a.pets?.name ?? "—"}
+                            <div className="flex items-start gap-2">
+                              {a.pets?.photo_url ? (
+                                <img
+                                  src={a.pets.photo_url}
+                                  alt={a.pets.name ?? "Pet"}
+                                  className="h-10 w-10 shrink-0 rounded object-cover"
+                                />
+                              ) : null}
+                              <div className="min-w-0">
+                                <div className="text-base font-bold leading-tight">
+                                  {a.pets?.name ?? "—"}
+                                </div>
+                                {groomingPetIdentityLine({
+                                  breed: a.pets?.breed,
+                                  colour: a.pets?.colour,
+                                  ownerLastName: a.owners?.last_name,
+                                }) ? (
+                                  <div className="text-[11px]">
+                                    {groomingPetIdentityLine({
+                                      breed: a.pets?.breed,
+                                      colour: a.pets?.colour,
+                                      ownerLastName: a.owners?.last_name,
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
+                            {a.stay?.boarding ? (
+                              <div className="font-semibold">
+                                {formatGroomingBoardingStayLine(a.stay.boarding)}
+                              </div>
+                            ) : null}
+                            {a.stay?.daycare ? (
+                              <div className="font-semibold">
+                                {formatGroomingDaycareStayLine(a.stay.daycare)}
+                              </div>
+                            ) : null}
                             <div>Owner: {owner}</div>
                             {a.pets?.breed ? <div>Breed: {a.pets.breed}</div> : null}
                             {a.owners?.address?.trim() ? (
@@ -415,14 +470,37 @@ export function GroomingCardBlock({
   const serviceLabel = labelForGroomingService(appointment.service);
   const packageLabel = PACKAGE_LABEL[appointment.service] ?? serviceLabel;
   const money = invoiceMoney ?? groomingMoneyFromPrice(appointment.price ?? 0);
+  const identity = groomingPetIdentityLine({
+    breed: appointment.pets?.breed,
+    colour: appointment.pets?.colour,
+    ownerLastName: appointment.owners?.last_name,
+  });
 
   return (
     <article className="print-page border border-black p-4 text-[12px]">
       <header className="mb-3 border-b border-black pb-2">
-        <h1 className="text-2xl font-bold">{appointment.pets?.name ?? "Unknown pet"}</h1>
-        <p>
-          {appointment.pets?.breed ?? "Unknown breed"} · {appointment.pets?.size_category ?? "—"}
-        </p>
+        <div className="flex items-start gap-3">
+          {appointment.pets?.photo_url ? (
+            <img
+              src={appointment.pets.photo_url}
+              alt={appointment.pets.name ?? "Pet"}
+              className="h-14 w-14 shrink-0 rounded object-cover"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold">{appointment.pets?.name ?? "Unknown pet"}</h1>
+            <p>
+              {identity ||
+                `${appointment.pets?.breed ?? "Unknown breed"} · ${appointment.pets?.size_category ?? "—"}`}
+            </p>
+            {appointment.stay?.boarding ? (
+              <p className="font-semibold">{formatGroomingBoardingStayLine(appointment.stay.boarding)}</p>
+            ) : null}
+            {appointment.stay?.daycare ? (
+              <p className="font-semibold">{formatGroomingDaycareStayLine(appointment.stay.daycare)}</p>
+            ) : null}
+          </div>
+        </div>
         <p className="print-sans text-xs">
           {format(parseISO(appointment.appointment_date), "d MMM yyyy")} ·{" "}
           {formatAppointmentTime(appointment.appointment_time)}

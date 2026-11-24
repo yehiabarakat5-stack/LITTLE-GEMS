@@ -19,7 +19,7 @@ type GroomingInsert = Database["public"]["Tables"]["grooming_appointments"]["Ins
 type GroomingUpdate = Database["public"]["Tables"]["grooming_appointments"]["Update"];
 
 const GROOMING_JOIN_SELECT =
-  "*, owners(first_name, last_name, phone, other_notes), pets(name, breed, weight_kg, grooming_notes, colour, other_notes, special_alerts)";
+  "*, owners(first_name, last_name, phone, other_notes), pets(name, breed, weight_kg, grooming_notes, colour, other_notes, special_alerts, photo_url)";
 
 export type GroomingAppointmentWithJoins = GroomingRow & {
   owners: { first_name: string; last_name: string; phone: string; other_notes: string | null } | null;
@@ -31,6 +31,7 @@ export type GroomingAppointmentWithJoins = GroomingRow & {
     colour: string | null;
     other_notes: string | null;
     special_alerts: Database["public"]["Tables"]["pets"]["Row"]["special_alerts"];
+    photo_url?: string | null;
   } | null;
 };
 
