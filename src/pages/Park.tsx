@@ -11,7 +11,8 @@ import TopBar from "@/components/dashboard/TopBar";
 import { ownerDisplayName, createServiceInvoice } from "@/lib/bookingUtils";
 import { buildPriceMap, parkGroupPricing } from "@/lib/servicePricing";
 import { useOwners, useOwner } from "@/hooks/useOwners";
-import { usePets } from "@/hooks/usePets";
+import { usePets, useCreatePet } from "@/hooks/usePets";
+import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -347,6 +348,17 @@ const ParkPage = () => {
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [ownerLabel, setOwnerLabel] = useState<string | null>(null);
   const [selectedPetIds, setSelectedPetIds] = useState<Set<string>>(new Set());
+  const [newDogOpen, setNewDogOpen] = useState(false);
+  const [newDogForm, setNewDogForm] = useState({
+    name: "",
+    breed: "",
+    date_of_birth: "",
+    gender: "" as "" | "male" | "female",
+    size_category: "" as "" | "S" | "M" | "L" | "XL",
+    weight_kg: "",
+  });
+  const [newDogSaving, setNewDogSaving] = useState(false);
+  const createPet = useCreatePet();
   const [bookingType, setBookingType] = useState<"park" | "assessment">("park");
   const [billingOption, setBillingOption] = useState<"none" | "invoice" | "charge_now">(
     "invoice",
@@ -435,6 +447,66 @@ const ParkPage = () => {
   const closeSheet = () => {
     setSheetOpen(false);
     setSheetSlot(null);
+    setNewDogOpen(false);
+    setNewDogForm({
+      name: "",
+      breed: "",
+      date_of_birth: "",
+      gender: "",
+      size_category: "",
+      weight_kg: "",
+    });
+  };
+
+  const saveNewDogForAssessment = async () => {
+    if (!ownerId) {
+      toast.error("Select an owner first.");
+      return;
+    }
+    const name = newDogForm.name.trim();
+    if (!name) {
+      toast.error("Enter the new dog's name.");
+      return;
+    }
+    setNewDogSaving(true);
+    try {
+      const weight =
+        newDogForm.weight_kg.trim() === ""
+          ? null
+          : Number(newDogForm.weight_kg);
+      if (weight != null && !(weight > 0)) {
+        toast.error("Weight must be a positive number.");
+        setNewDogSaving(false);
+        return;
+      }
+      const pet = await createPet.mutateAsync({
+        owner_id: ownerId,
+        name,
+        species: "dog",
+        breed: newDogForm.breed.trim() || null,
+        date_of_birth: newDogForm.date_of_birth || null,
+        gender: newDogForm.gender || null,
+        size_category: newDogForm.size_category || null,
+        weight_kg: weight,
+        assessment_status: "not_assessed",
+      });
+      setSelectedPetIds(new Set([pet.id]));
+      setBookingType("assessment");
+      setNewDogOpen(false);
+      setNewDogForm({
+        name: "",
+        breed: "",
+        date_of_birth: "",
+        gender: "",
+        size_category: "",
+        weight_kg: "",
+      });
+      toast.success(`${pet.name} added — save to book the assessment.`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Could not add dog.");
+    } finally {
+      setNewDogSaving(false);
+    }
   };
 
   const togglePet = (petId: string) => {
@@ -1013,7 +1085,11 @@ const ParkPage = () => {
                   Select an owner to list pets.
                 </p>
               ) : filteredPets.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No pets on file.</p>
+                <p className="text-sm text-muted-foreground">
+                  {bookingType === "assessment"
+                    ? "No not-yet-assessed pets on file — add a new dog below."
+                    : "No pets on file."}
+                </p>
               ) : (
                 <ul className="space-y-2 rounded-md border p-3 max-h-48 overflow-y-auto">
                   {filteredPets.map((p) => (
@@ -1033,6 +1109,147 @@ const ParkPage = () => {
                   ))}
                 </ul>
               )}
+              {ownerId && bookingType === "assessment" ? (
+                <div className="space-y-2">
+                  {!newDogOpen ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setNewDogOpen(true)}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      New dog (not yet assessed)
+                    </Button>
+                  ) : (
+                    <div className="space-y-3 rounded-md border p-3">
+                      <p className="text-sm font-medium">New dog for assessment</p>
+                      <div className="grid gap-2">
+                        <Label htmlFor="park-new-dog-name">Name</Label>
+                        <Input
+                          id="park-new-dog-name"
+                          value={newDogForm.name}
+                          onChange={(e) =>
+                            setNewDogForm((f) => ({ ...f, name: e.target.value }))
+                          }
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Breed</Label>
+                        <PetBreedCombobox
+                          value={newDogForm.breed}
+                          onChange={(breed) =>
+                            setNewDogForm((f) => ({ ...f, breed }))
+                          }
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="park-new-dog-dob">Date of birth</Label>
+                          <Input
+                            id="park-new-dog-dob"
+                            type="date"
+                            value={newDogForm.date_of_birth}
+                            onChange={(e) =>
+                              setNewDogForm((f) => ({
+                                ...f,
+                                date_of_birth: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Gender</Label>
+                          <Select
+                            value={newDogForm.gender || "unknown"}
+                            onValueChange={(v) =>
+                              setNewDogForm((f) => ({
+                                ...f,
+                                gender: v === "unknown" ? "" : (v as "male" | "female"),
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Choose" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unknown">—</SelectItem>
+                              <SelectItem value="male">Male</SelectItem>
+                              <SelectItem value="female">Female</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="grid gap-2">
+                          <Label>Size</Label>
+                          <Select
+                            value={newDogForm.size_category || "unknown"}
+                            onValueChange={(v) =>
+                              setNewDogForm((f) => ({
+                                ...f,
+                                size_category:
+                                  v === "unknown"
+                                    ? ""
+                                    : (v as "S" | "M" | "L" | "XL"),
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Choose" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unknown">—</SelectItem>
+                              <SelectItem value="S">S</SelectItem>
+                              <SelectItem value="M">M</SelectItem>
+                              <SelectItem value="L">L</SelectItem>
+                              <SelectItem value="XL">XL</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="park-new-dog-weight">Weight (kg)</Label>
+                          <Input
+                            id="park-new-dog-weight"
+                            inputMode="decimal"
+                            value={newDogForm.weight_kg}
+                            onChange={(e) =>
+                              setNewDogForm((f) => ({
+                                ...f,
+                                weight_kg: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={newDogSaving}
+                          onClick={() => void saveNewDogForAssessment()}
+                        >
+                          {newDogSaving ? (
+                            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Add dog
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={newDogSaving}
+                          onClick={() => setNewDogOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-2 rounded-lg border px-3 py-3">
