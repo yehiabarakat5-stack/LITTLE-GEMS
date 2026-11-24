@@ -108,9 +108,11 @@ import {
   Receipt,
   Eye,
   Printer,
+  Link2 as ProfileLinkIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
+import { SendProfileLinkDialog } from "@/components/onboarding/SendProfileLinkDialog";
 
 type MemberType = Database["public"]["Enums"]["member_type"];
 type BookingStatus = Database["public"]["Enums"]["booking_status"];
@@ -752,6 +754,7 @@ const OwnerProfilePage = () => {
   const deletePet = useDeletePet();
 
   const [editOwnerOpen, setEditOwnerOpen] = useState(false);
+  const [profileLinkOpen, setProfileLinkOpen] = useState(false);
   const [addPetOpen, setAddPetOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeletePet, setPendingDeletePet] = useState<PetWithVaccinations | null>(null);
@@ -1049,6 +1052,18 @@ const OwnerProfilePage = () => {
                 </Button>
               </div>
               <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setProfileLinkOpen(true)}>
+                  <ProfileLinkIcon className="mr-1.5 h-4 w-4" />
+                  Profile link
+                </Button>
+                <SendProfileLinkDialog
+                  open={profileLinkOpen}
+                  onOpenChange={setProfileLinkOpen}
+                  ownerId={owner.id}
+                  ownerName={ownerDisplayName(owner.first_name, owner.last_name)}
+                  phone={owner.phone}
+                  defaultStage={owner.membership_fee_paid ? "assessment" : "membership"}
+                />
                 <Button variant="outline" size="sm" onClick={openEditDrawer}>
                   <Pencil className="mr-1.5 h-4 w-4" />
                   Edit

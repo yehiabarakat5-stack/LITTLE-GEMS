@@ -56,10 +56,11 @@ import {
 } from "@/components/ui/select";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { VetClinicCombobox } from "@/components/VetClinicCombobox";
-import { Search, Plus, Eye, Loader2, Trash2 } from "lucide-react";
+import { Search, Plus, Eye, Loader2, Trash2, Link2 as ProfileLinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 import { inferLittleGemsPetSizeCategory } from "@/lib/dogSizeForm";
+import { SendProfileLinkDialog } from "@/components/onboarding/SendProfileLinkDialog";
 
 type MemberType = Database["public"]["Enums"]["member_type"];
 type OwnerInsert = Database["public"]["Tables"]["owners"]["Insert"];
@@ -140,6 +141,7 @@ const CustomersPage = () => {
   const debouncedSearch = useDebounce(search, 300);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [profileLinkOpen, setProfileLinkOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
   const [form, setForm] = useState<OwnerInsert>({ ...INITIAL_FORM });
   const [wizardOwner, setWizardOwner] = useState<OwnerInsert>({
@@ -382,6 +384,11 @@ const CustomersPage = () => {
                 Filter: {activeFilter.replace(/-/g, " ")}
               </Badge>
             )}
+            <Button variant="outline" onClick={() => setProfileLinkOpen(true)}>
+              <ProfileLinkIcon className="mr-2 h-4 w-4" />
+              Send profile link
+            </Button>
+            <SendProfileLinkDialog open={profileLinkOpen} onOpenChange={setProfileLinkOpen} defaultStage="assessment" />
             <Button variant="outline" onClick={() => setWizardOpen(true)}>
               New Client Wizard
             </Button>

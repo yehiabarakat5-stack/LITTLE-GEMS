@@ -7,4 +7,6 @@ declare module "*.txt?raw" {
 
 interface ImportMetaEnv {
   readonly VITE_ANTHROPIC_API_KEY?: string;
+  /** Optional absolute host for /api/onboarding-links (local → admin-essentials). */
+  readonly VITE_ONBOARDING_API_BASE?: string;
 }
