@@ -14,14 +14,14 @@ type ParkDayStatus = Database["public"]["Enums"]["park_day_status"];
 
 export type ParkBookingWithJoins = ParkBooking & {
   owners: { first_name: string; last_name: string; phone: string; other_notes: string | null } | null;
-  pets: { name: string; other_notes: string | null } | null;
+  pets: { name: string; breed?: string | null; other_notes: string | null } | null;
   /** Present after park_assessment_reviewed migration — client online assessments. */
   reviewed_at?: string | null;
   reviewed_by?: string | null;
 };
 
 const PARK_JOIN_SELECT =
-  "*, owners(first_name, last_name, phone, other_notes), pets(name, other_notes)";
+  "*, owners(first_name, last_name, phone, other_notes), pets(name, breed, other_notes)";
 
 export const queryKeys = {
   parkBookings: (date: string) => ["park", "bookings", date] as const,
@@ -164,17 +164,36 @@ export function useDeleteParkBooking() {
 
 export type SetParkDayFlagInput = {
   visit_date: string;
-  status: ParkDayStatus;
+  status: ParkDayStatus | "partial_block";
   notes: string | null;
+  block_start?: string | null;
+  block_end?: string | null;
+  block_ranges?: { start: string; end: string }[] | null;
 };
 
 export function useSetParkDayFlag() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ visit_date, status, notes }: SetParkDayFlagInput) => {
-      const { data: existing, error: selErr } = await supabase
-        .from("park_day_flags")
+    mutationFn: async ({
+      visit_date,
+      status,
+      notes,
+      block_start = null,
+      block_end = null,
+      block_ranges = null,
+    }: SetParkDayFlagInput) => {
+      // Shared DB may already have partial_block + block_ranges; LG generated types lag.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const table = supabase.from("park_day_flags") as any;
+      const payload = {
+        status,
+        notes,
+        block_start: status === "partial_block" ? block_start : null,
+        block_end: status === "partial_block" ? block_end : null,
+        block_ranges: status === "partial_block" ? (block_ranges ?? []) : [],
+      };
+      const { data: existing, error: selErr } = await table
         .select("id")
         .eq("visit_date", visit_date)
         .maybeSingle();
@@ -182,9 +201,8 @@ export function useSetParkDayFlag() {
       if (selErr) throw selErr;
 
       if (existing?.id) {
-        const { data, error } = await supabase
-          .from("park_day_flags")
-          .update({ status, notes })
+        const { data, error } = await table
+          .update(payload)
           .eq("id", existing.id)
           .select()
           .single();
@@ -193,9 +211,8 @@ export function useSetParkDayFlag() {
         return data as ParkDayFlag;
       }
 
-      const { data, error } = await supabase
-        .from("park_day_flags")
-        .insert({ visit_date, status, notes })
+      const { data, error } = await table
+        .insert({ visit_date, ...payload })
         .select()
         .single();
 

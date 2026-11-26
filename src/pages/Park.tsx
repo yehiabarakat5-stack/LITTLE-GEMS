@@ -59,11 +59,35 @@ import { toast } from "sonner";
 import type { Database } from "@/integrations/supabase/types";
 import { grandTotalFromNet, vatAmountFromNet, vatLineLabel } from "@/lib/vatConfig";
 import { memberTierBadgeClassName, memberTierBadgeLabel } from "@/lib/memberTier";
+import {
+  emptyParkBlockRange,
+  parkBlockMinutes,
+  parkBlockRangesFromFlag,
+  parkDayFlagBlockPayload,
+  slotOverlapsAnyParkBlock,
+  validateParkBlockRanges,
+  type ParkBlockRange,
+} from "@/lib/parkBlockRanges";
 
-type ParkDayStatus = Database["public"]["Enums"]["park_day_status"];
+type ParkDayStatus = Database["public"]["Enums"]["park_day_status"] | "partial_block";
 type AssessmentStatus = Database["public"]["Enums"]["assessment_status"];
 
 const ANCHOR = new Date(2000, 0, 1);
+
+function formatParkTimeLabel(time: string): string {
+  return format(parse(normalizeSlotTime(time), "HH:mm:ss", ANCHOR), "h:mm a");
+}
+
+function formatParkBlockRangesLabel(ranges: ParkBlockRange[]): string {
+  return ranges
+    .map((r) => `${formatParkTimeLabel(r.start)} – ${formatParkTimeLabel(r.end)}`)
+    .join(" · ");
+}
+
+const PARK_BLOCK_HOUR_MARKS: string[] = Array.from({ length: 11 }, (_, i) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(8 + i)}:00:00`;
+});
 
 /** 30-minute slots: 08:00–08:30 … 17:30–18:00 */
 const PARK_SLOTS: { slot_start: string; slot_end: string }[] = Array.from(
@@ -131,7 +155,9 @@ function bookingCustomerLabel(b: ParkBookingWithJoins): string {
 }
 
 function bookingPetLabel(b: ParkBookingWithJoins): string {
-  return b.pets?.name ?? b.pet_name_raw ?? "—";
+  const name = b.pets?.name ?? b.pet_name_raw ?? "—";
+  const breed = b.pets?.breed?.trim();
+  return breed ? `${name} · ${breed}` : name;
 }
 
 function bookingTimeRangeLabel(b: ParkBookingWithJoins): string {
@@ -324,18 +350,35 @@ const ParkPage = () => {
       ? parkPriceMap.get("park_1_dog")
       : parkPriceMap.get("park_slot")) ?? (parkRates[0]?.price_per_slot_aed ?? 0);
 
-  const effectiveStatus: ParkDayStatus = dayFlag?.status ?? "open";
+  const effectiveStatus: ParkDayStatus = (dayFlag?.status as ParkDayStatus) ?? "open";
+  const effectiveBlockRanges = useMemo(
+    () =>
+      effectiveStatus === "partial_block"
+        ? parkBlockRangesFromFlag(dayFlag as { block_ranges?: unknown; block_start?: string | null; block_end?: string | null })
+        : [],
+    [dayFlag, effectiveStatus],
+  );
 
   const [flagStatus, setFlagStatus] = useState<ParkDayStatus>("open");
   const [flagNotes, setFlagNotes] = useState("");
+  const [flagBlockRanges, setFlagBlockRanges] = useState<ParkBlockRange[]>([
+    emptyParkBlockRange(),
+  ]);
 
   useEffect(() => {
     if (dayFlag) {
-      setFlagStatus(dayFlag.status);
+      setFlagStatus(dayFlag.status as ParkDayStatus);
       setFlagNotes(dayFlag.notes ?? "");
+      if ((dayFlag.status as string) === "partial_block") {
+        const ranges = parkBlockRangesFromFlag(
+          dayFlag as { block_ranges?: unknown; block_start?: string | null; block_end?: string | null },
+        );
+        setFlagBlockRanges(ranges.length ? ranges : [emptyParkBlockRange()]);
+      }
     } else {
       setFlagStatus("open");
       setFlagNotes("");
+      setFlagBlockRanges([emptyParkBlockRange()]);
     }
   }, [dayFlag, dateStr]);
 
@@ -440,6 +483,17 @@ const ParkPage = () => {
       toast.message("Park is closed — no bookings today.");
       return;
     }
+    if (
+      effectiveStatus === "partial_block" &&
+      slotOverlapsAnyParkBlock(slot_start, slot_end, effectiveBlockRanges)
+    ) {
+      toast.message(
+        effectiveBlockRanges.length
+          ? `Park is blocked ${formatParkBlockRangesLabel(effectiveBlockRanges)} — no bookings in this window.`
+          : "Park is partially blocked — no bookings in this window.",
+      );
+      return;
+    }
     setSheetSlot({ slot_start, slot_end });
     setDurationMinutes(30);
     setOwnerId(null);
@@ -479,6 +533,10 @@ const ParkPage = () => {
       toast.error("Enter the new dog's name.");
       return;
     }
+    if (!newDogForm.breed.trim()) {
+      toast.error("Breed is required.");
+      return;
+    }
     setNewDogSaving(true);
     try {
       const weight =
@@ -494,7 +552,7 @@ const ParkPage = () => {
         owner_id: ownerId,
         name,
         species: "dog",
-        breed: newDogForm.breed.trim() || null,
+        breed: newDogForm.breed.trim(),
         date_of_birth: newDogForm.date_of_birth || null,
         gender: newDogForm.gender || null,
         size_category: newDogForm.size_category || null,
@@ -709,11 +767,23 @@ const ParkPage = () => {
   };
 
   const handleSaveDayFlag = () => {
+    if (flagStatus === "partial_block") {
+      const rangeError = validateParkBlockRanges(flagBlockRanges);
+      if (rangeError) {
+        toast.error(rangeError);
+        return;
+      }
+    }
+    const blockPayload =
+      flagStatus === "partial_block"
+        ? parkDayFlagBlockPayload(flagBlockRanges)
+        : { block_start: null, block_end: null, block_ranges: [] as ParkBlockRange[] };
     setDayFlag.mutate(
       {
         visit_date: dateStr,
         status: flagStatus,
         notes: flagNotes.trim() || null,
+        ...blockPayload,
       },
       {
         onSuccess: () => toast.success("Day settings saved."),
@@ -799,7 +869,13 @@ const ParkPage = () => {
               <Label className="text-xs text-muted-foreground">Day status</Label>
               <Select
                 value={flagStatus}
-                onValueChange={(v) => setFlagStatus(v as ParkDayStatus)}
+                onValueChange={(v) => {
+                  const next = v as ParkDayStatus;
+                  setFlagStatus(next);
+                  if (next === "partial_block" && flagBlockRanges.length === 0) {
+                    setFlagBlockRanges([emptyParkBlockRange()]);
+                  }
+                }}
                 disabled={flagLoading}
               >
                 <SelectTrigger>
@@ -809,9 +885,116 @@ const ParkPage = () => {
                   <SelectItem value="open">Open</SelectItem>
                   <SelectItem value="closed">Closed</SelectItem>
                   <SelectItem value="assessment_only">Assessment Only</SelectItem>
+                  <SelectItem value="partial_block">Partial block</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {flagStatus === "partial_block" ? (
+              <div className="w-full basis-full space-y-2 rounded-md border border-dashed border-orange-300/80 bg-orange-50/40 p-3">
+                <Label className="text-xs text-muted-foreground">Blocked time ranges</Label>
+                {flagBlockRanges.map((range, index) => {
+                  const endOptions = PARK_BLOCK_HOUR_MARKS.filter(
+                    (t) => parkBlockMinutes(t) > parkBlockMinutes(range.start),
+                  );
+                  return (
+                    <div
+                      key={`block-range-${index}`}
+                      className="flex flex-wrap items-end gap-2"
+                      data-testid={`park-block-range-${index}`}
+                    >
+                      <div className="space-y-1 min-w-[8rem]">
+                        <Label className="text-xs text-muted-foreground">Start</Label>
+                        <Select
+                          value={range.start}
+                          onValueChange={(v) => {
+                            setFlagBlockRanges((prev) =>
+                              prev.map((r, i) => {
+                                if (i !== index) return r;
+                                const next = { ...r, start: v };
+                                if (parkBlockMinutes(next.end) <= parkBlockMinutes(v)) {
+                                  const nextEnd = PARK_BLOCK_HOUR_MARKS.find(
+                                    (t) => parkBlockMinutes(t) > parkBlockMinutes(v),
+                                  );
+                                  if (nextEnd) next.end = nextEnd;
+                                }
+                                return next;
+                              }),
+                            );
+                          }}
+                          disabled={flagLoading}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PARK_BLOCK_HOUR_MARKS.filter(
+                              (t) => parkBlockMinutes(t) < 18 * 60,
+                            ).map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {formatParkTimeLabel(t)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1 min-w-[8rem]">
+                        <Label className="text-xs text-muted-foreground">End</Label>
+                        <Select
+                          value={range.end}
+                          onValueChange={(v) => {
+                            setFlagBlockRanges((prev) =>
+                              prev.map((r, i) => (i === index ? { ...r, end: v } : r)),
+                            );
+                          }}
+                          disabled={flagLoading || endOptions.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {endOptions.map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {formatParkTimeLabel(t)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {flagBlockRanges.length > 1 ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 shrink-0"
+                          aria-label={`Remove time range ${index + 1}`}
+                          disabled={flagLoading}
+                          onClick={() =>
+                            setFlagBlockRanges((prev) => prev.filter((_, i) => i !== index))
+                          }
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={flagLoading || flagBlockRanges.length >= 6}
+                  onClick={() =>
+                    setFlagBlockRanges((prev) => [
+                      ...prev,
+                      emptyParkBlockRange({ start: "16:00:00", end: "18:00:00" }),
+                    ])
+                  }
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add another time range
+                </Button>
+              </div>
+            ) : null}
             <div className="space-y-1 flex-1 min-w-[8rem] max-w-xs">
               <Label className="text-xs text-muted-foreground">Notes</Label>
               <Input
@@ -841,6 +1024,14 @@ const ParkPage = () => {
             CLOSED — No bookings today
           </div>
         )}
+        {effectiveStatus === "partial_block" && effectiveBlockRanges.length > 0 && (
+          <div
+            className="w-full rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-orange-900"
+            role="status"
+          >
+            PARTIAL BLOCK — Park closed {formatParkBlockRangesLabel(effectiveBlockRanges)}
+          </div>
+        )}
         {effectiveStatus === "assessment_only" && (
           <div
             className="w-full rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold uppercase tracking-wide text-amber-900"
@@ -866,6 +1057,13 @@ const ParkPage = () => {
             {PARK_SLOTS.map((slot) => {
               const key = normalizeSlotTime(slot.slot_start);
               const cellBookings = bookingsBySlot.get(key) ?? [];
+              const slotPartiallyBlocked =
+                effectiveStatus === "partial_block" &&
+                slotOverlapsAnyParkBlock(
+                  slot.slot_start,
+                  slot.slot_end,
+                  effectiveBlockRanges,
+                );
               const sortedBookings = [...cellBookings].sort((a, b) => {
                 const byStart = a.slot_start.localeCompare(b.slot_start);
                 if (byStart !== 0) return byStart;
@@ -879,6 +1077,11 @@ const ParkPage = () => {
                   </div>
 
                   <div className="bg-background p-1 flex flex-col gap-1 min-h-[3.5rem]">
+                    {slotPartiallyBlocked ? (
+                      <div className="rounded-md border border-orange-300 bg-orange-100 px-2 py-1.5 text-[11px] font-semibold text-orange-900">
+                        Partial block — no new bookings
+                      </div>
+                    ) : null}
                     {sortedBookings.map((b) => (
                       <button
                         key={b.id}
@@ -904,7 +1107,7 @@ const ParkPage = () => {
                     ))}
                     <button
                       type="button"
-                      disabled={effectiveStatus === "closed"}
+                      disabled={effectiveStatus === "closed" || slotPartiallyBlocked}
                       onClick={() =>
                         openNewBooking(slot.slot_start, slot.slot_end)
                       }
@@ -949,9 +1152,7 @@ const ParkPage = () => {
               </div>
               <div>
                 <p className="text-xs uppercase text-muted-foreground">Pet</p>
-                <p className="font-medium">
-                  {bookingDetail.pets?.name ?? bookingDetail.pet_name_raw ?? "—"}
-                </p>
+                <p className="font-medium">{bookingPetLabel(bookingDetail)}</p>
               </div>
               <div>
                 <p className="text-xs uppercase text-muted-foreground">Owner</p>
@@ -1183,12 +1384,13 @@ const ParkPage = () => {
                         />
                       </div>
                       <div className="grid gap-2">
-                        <Label>Breed</Label>
+                        <Label>Breed *</Label>
                         <PetBreedCombobox
                           value={newDogForm.breed}
                           onChange={(breed) =>
                             setNewDogForm((f) => ({ ...f, breed }))
                           }
+                          placeholder="Select breed or Mixed / Other…"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-2">

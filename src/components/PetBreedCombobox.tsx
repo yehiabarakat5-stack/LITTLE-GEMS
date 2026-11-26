@@ -18,7 +18,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 /** Shown at bottom of breed list — never stored as `breed`; opens custom entry. */
-export const ADD_CUSTOM_BREED_OPTION = "+ Add custom breed";
+export const ADD_CUSTOM_BREED_OPTION = "Mixed / Other";
 
 export interface PetBreedComboboxProps {
   id?: string;
@@ -96,7 +96,7 @@ export function PetBreedCombobox({
         <Input
           id={id}
           disabled={busy}
-          placeholder="Enter breed name…"
+          placeholder="Describe Mixed / Other…"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="h-10 flex-1 min-w-0"
