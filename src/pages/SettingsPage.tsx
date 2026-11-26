@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import TopBar from "@/components/dashboard/TopBar";
 import { ReferenceListsSettings } from "@/components/settings/ReferenceListsSettings";
 import { BoardingCalendarStatusColorsSettings } from "@/components/settings/BoardingCalendarStatusColorsSettings";
+import VisitRequestSoundSettings from "@/components/settings/VisitRequestSoundSettings";
 import { supabase } from "@/integrations/supabase/client";
 
 type SaveResult = "idle" | "success" | "error";
@@ -163,6 +164,8 @@ const SettingsPage = () => {
           <ReferenceListsSettings />
 
           <BoardingCalendarStatusColorsSettings />
+
+          <VisitRequestSoundSettings />
 
           {loading ? (
             <div className="flex flex-col gap-8">

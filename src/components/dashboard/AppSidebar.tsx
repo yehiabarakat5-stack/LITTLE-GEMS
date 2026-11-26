@@ -13,13 +13,17 @@ import {
   DoorOpen,
   Sparkles,
   Stethoscope,
+  Inbox,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useVisitRequests } from "@/hooks/useVisitRequests";
+import { VISIT_REQUEST_ALERT_BRANCH_ID, todoVisitRequests } from "@/lib/visitRequestAlerts";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+  { icon: Inbox, label: "Visit Requests", path: "/visit-requests" },
   { icon: Users, label: "Customers & Pets", path: "/customers" },
   { icon: Hotel, label: "Boarding", path: "/boarding" },
   { icon: Sun, label: "Daycare", path: "/daycare" },
@@ -39,6 +43,8 @@ const settingsItems = [
 const AppSidebar = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const { data: visitRows = [] } = useVisitRequests(VISIT_REQUEST_ALERT_BRANCH_ID);
+  const visitTodoCount = todoVisitRequests(visitRows).length;
 
   return (
     <aside className="flex h-screen w-60 flex-col bg-sidebar text-sidebar-foreground shrink-0">
@@ -62,6 +68,14 @@ const AppSidebar = () => {
           >
             <item.icon className="h-4 w-4 shrink-0" />
             <span>{item.label}</span>
+            {item.path === "/visit-requests" && visitTodoCount > 0 ? (
+              <span
+                data-testid="visit-request-sidebar-count"
+                className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+              >
+                {visitTodoCount}
+              </span>
+            ) : null}
           </NavLink>
         ))}
 
