@@ -1,23 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useVisitRequestAlertPrefs, useVisitRequestAudioUnlock } from "@/hooks/useVisitRequestAlerts";
+import {
+  clientAssessmentContactName,
+  clientAssessmentPetName,
+  useUnhandledClientAssessments,
+} from "@/hooks/useClientAssessmentAlerts";
 import { useVisitRequests, type VisitRequest } from "@/hooks/useVisitRequests";
 import { supabase } from "@/integrations/supabase/client";
 import {
   VISIT_REQUEST_ALARM_CHANNEL,
   VISIT_REQUEST_ALERT_BRANCH_ID,
   VISIT_REQUEST_ALERT_BRAND,
+  alarmBannerForPayload,
+  alertOpenPath,
+  assessmentAlarmPayload,
+  assessmentBookingNewToast,
   isTodoVisitRequest,
   isVisitRequestAlarmPlaying,
+  newestNewAlertItem,
   newestNewVisitRequest,
   startVisitRequestAlarm,
   stopVisitRequestAlarm,
   todoVisitRequests,
-  visitRequestAlarmBanner,
   visitRequestAlarmPayload,
   visitRequestNewToast,
   visitRequestTabTitle,
@@ -25,7 +34,7 @@ import {
   type VisitRequestAlarmPayload,
 } from "@/lib/visitRequestAlerts";
 
-const EMPTY: VisitRequest[] = [];
+const EMPTY_VISITS: VisitRequest[] = [];
 
 /** Tab title, toast, looping alarm + banner, and realtime refresh. Mount once in the dashboard shell. */
 export default function VisitRequestAlertHost() {
@@ -34,9 +43,13 @@ export default function VisitRequestAlertHost() {
   const branchId = VISIT_REQUEST_ALERT_BRANCH_ID;
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data, isFetched } = useVisitRequests(canSee ? branchId : null);
-  const rows = data ?? EMPTY;
-  const open = todoVisitRequests(rows);
+  const visitsQuery = useVisitRequests(canSee ? branchId : null);
+  const assessmentsQuery = useUnhandledClientAssessments(canSee ? branchId : null);
+  const visitRows = visitsQuery.data ?? EMPTY_VISITS;
+  const assessmentRows = assessmentsQuery.data ?? [];
+  const openVisits = todoVisitRequests(visitRows);
+  const openCount = openVisits.length + assessmentRows.length;
+  const isFetched = visitsQuery.isFetched && assessmentsQuery.isFetched;
   const seenIds = useRef<Set<string> | null>(null);
   const { prefs } = useVisitRequestAlertPrefs();
   const { unlocked, unlock } = useVisitRequestAudioUnlock();
@@ -49,6 +62,8 @@ export default function VisitRequestAlertHost() {
   prefsRef.current = prefs;
   unlockedRef.current = unlocked;
   ringingRef.current = ringing;
+
+  const openAssessmentIds = useMemo(() => new Set(assessmentRows.map((r) => r.id)), [assessmentRows]);
 
   const clearBannerTimer = () => {
     if (bannerTimer.current) {
@@ -94,7 +109,7 @@ export default function VisitRequestAlertHost() {
       } else {
         bannerTimer.current = setTimeout(finish, ms);
       }
-      if (!fromPeer) postAlarm({ type: "start", request: visitRequestAlarmPayload(row) });
+      if (!fromPeer) postAlarm({ type: "start", request: row });
     },
     [postAlarm, silence],
   );
@@ -108,11 +123,11 @@ export default function VisitRequestAlertHost() {
       document.title = VISIT_REQUEST_ALERT_BRAND;
       return;
     }
-    document.title = visitRequestTabTitle(open.length);
+    document.title = visitRequestTabTitle(openCount);
     return () => {
       document.title = VISIT_REQUEST_ALERT_BRAND;
     };
-  }, [canSee, open.length]);
+  }, [canSee, openCount]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
@@ -132,25 +147,67 @@ export default function VisitRequestAlertHost() {
 
   useEffect(() => {
     if (!canSee || !isFetched) return;
+    const allIds = [
+      ...visitRows.map((r) => r.id),
+      ...assessmentRows.map((r) => r.id),
+    ];
     if (seenIds.current === null) {
-      seenIds.current = new Set(rows.map((row) => row.id));
+      seenIds.current = new Set(allIds);
       return;
     }
-    const newest = newestNewVisitRequest(rows, seenIds.current);
-    for (const row of rows) {
+    const newestVisit = newestNewVisitRequest(visitRows, seenIds.current);
+    const newestAssessment = newestNewAlertItem(assessmentRows, seenIds.current);
+
+    for (const row of visitRows) {
       if (row.status === "new" && !seenIds.current.has(row.id)) {
         toast.message(visitRequestNewToast(row.contact_name));
       }
       seenIds.current.add(row.id);
     }
-    if (newest && prefsRef.current.enabled) beginRing(visitRequestAlarmPayload(newest), false);
-  }, [beginRing, canSee, isFetched, rows]);
+    for (const row of assessmentRows) {
+      if (!seenIds.current.has(row.id)) {
+        toast.message(assessmentBookingNewToast(clientAssessmentContactName(row)));
+      }
+      seenIds.current.add(row.id);
+    }
+
+    if (!prefsRef.current.enabled) return;
+    const candidates: VisitRequestAlarmPayload[] = [];
+    if (newestVisit) {
+      candidates.push(
+        visitRequestAlarmPayload({
+          id: newestVisit.id,
+          contact_name: newestVisit.contact_name,
+          pet_name: newestVisit.pet_name,
+          interest: newestVisit.interest,
+          created_at: newestVisit.created_at,
+        }),
+      );
+    }
+    if (newestAssessment) {
+      candidates.push(
+        assessmentAlarmPayload({
+          id: newestAssessment.id,
+          contact_name: clientAssessmentContactName(newestAssessment),
+          pet_name: clientAssessmentPetName(newestAssessment),
+          created_at: newestAssessment.created_at,
+          visit_date: newestAssessment.visit_date,
+        }),
+      );
+    }
+    if (!candidates.length) return;
+    const newest = candidates.reduce((a, b) => (a.created_at >= b.created_at ? a : b));
+    beginRing(newest, false);
+  }, [assessmentRows, beginRing, canSee, isFetched, visitRows]);
 
   useEffect(() => {
     if (!ringing) return;
-    const stillTodo = rows.some((row) => row.id === ringing.id && isTodoVisitRequest(row.status));
-    if (!stillTodo) silence(true);
-  }, [ringing, rows, silence]);
+    const stillOpen =
+      ringing.kind === "assessment"
+        ? openAssessmentIds.has(ringing.id)
+        : visitRows.some((r) => r.id === ringing.id && isTodoVisitRequest(r.status));
+    if (!stillOpen) silence(true);
+  }, [openAssessmentIds, ringing, silence, visitRows]);
 
   useEffect(() => {
     if (!prefs.enabled && ringingRef.current) silence(true);
@@ -179,12 +236,19 @@ export default function VisitRequestAlertHost() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = supabase as any;
     const channel = client
-      .channel(`visit-requests-${branchId}`)
+      .channel(`request-alerts-${branchId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "visit_requests", filter: `branch_id=eq.${branchId}` },
         () => {
           void qc.invalidateQueries({ queryKey: ["visit-requests", branchId] });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "park_bookings", filter: `branch_id=eq.${branchId}` },
+        () => {
+          void qc.invalidateQueries({ queryKey: ["client-assessment-alerts", branchId] });
         },
       )
       .subscribe();
@@ -241,7 +305,7 @@ export default function VisitRequestAlertHost() {
           data-testid="visit-request-alarm-banner"
           role="alert"
         >
-          <span className="font-medium">{visitRequestAlarmBanner(ringing)}</span>
+          <span className="font-medium">{alarmBannerForPayload(ringing)}</span>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -249,9 +313,13 @@ export default function VisitRequestAlertHost() {
               variant="secondary"
               data-testid="visit-request-alarm-open"
               onClick={() => {
-                const id = ringing.id;
+                const path = alertOpenPath({
+                  id: ringing.id,
+                  kind: ringing.kind,
+                  visitDate: ringing.visit_date,
+                });
                 silence(true);
-                navigate(`/visit-requests?request=${id}`);
+                navigate(path);
               }}
             >
               Open

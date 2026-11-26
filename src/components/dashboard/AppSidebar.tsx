@@ -18,6 +18,7 @@ import {
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useUnhandledClientAssessments } from "@/hooks/useClientAssessmentAlerts";
 import { useVisitRequests } from "@/hooks/useVisitRequests";
 import { VISIT_REQUEST_ALERT_BRANCH_ID, todoVisitRequests } from "@/lib/visitRequestAlerts";
 
@@ -44,7 +45,8 @@ const AppSidebar = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const { data: visitRows = [] } = useVisitRequests(VISIT_REQUEST_ALERT_BRANCH_ID);
-  const visitTodoCount = todoVisitRequests(visitRows).length;
+  const { data: assessmentRows = [] } = useUnhandledClientAssessments(VISIT_REQUEST_ALERT_BRANCH_ID);
+  const visitTodoCount = todoVisitRequests(visitRows).length + assessmentRows.length;
 
   return (
     <aside className="flex h-screen w-60 flex-col bg-sidebar text-sidebar-foreground shrink-0">

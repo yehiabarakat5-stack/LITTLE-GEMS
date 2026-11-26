@@ -15,6 +15,7 @@ import { usePets, useCreatePet } from "@/hooks/usePets";
 import { PetBreedCombobox } from "@/components/PetBreedCombobox";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useMarkClientAssessmentReviewed } from "@/hooks/useClientAssessmentAlerts";
 import {
   useParkBookings,
   useParkDayFlag,
@@ -423,6 +424,16 @@ const ParkPage = () => {
   const [bookingDetail, setBookingDetail] = useState<ParkBookingWithJoins | null>(
     null,
   );
+
+  const markAssessmentReviewed = useMarkClientAssessmentReviewed();
+
+  // Deep-link from request alerts: /park?date=…&type=assessment&booking=<id>
+  useEffect(() => {
+    const bookingId = searchParams.get("booking");
+    if (!bookingId || bookingsLoading) return;
+    const found = bookings.find((b) => b.id === bookingId);
+    if (found) setBookingDetail(found);
+  }, [bookings, bookingsLoading, searchParams]);
 
   const openNewBooking = (slot_start: string, slot_end: string) => {
     if (effectiveStatus === "closed") {
@@ -969,6 +980,41 @@ const ParkPage = () => {
                   Assessment
                 </Badge>
               )}
+              {bookingDetail.is_assessment &&
+              !bookingDetail.booked_by_staff_id &&
+              !bookingDetail.reviewed_at ? (
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={markAssessmentReviewed.isPending}
+                  data-testid="park-mark-assessment-seen"
+                  onClick={() => {
+                    void markAssessmentReviewed
+                      .mutateAsync({
+                        id: bookingDetail.id,
+                        reviewed_by: null,
+                      })
+                      .then(() => {
+                        setBookingDetail((prev) =>
+                          prev?.id === bookingDetail.id
+                            ? { ...prev, reviewed_at: new Date().toISOString() }
+                            : prev,
+                        );
+                        toast.success("Assessment booking marked as seen.");
+                      })
+                      .catch((e: unknown) => {
+                        toast.error(
+                          e instanceof Error ? e.message : "Could not mark as seen.",
+                        );
+                      });
+                  }}
+                >
+                  {markAssessmentReviewed.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Mark seen
+                </Button>
+              ) : null}
               {!bookingDetail.is_assessment && (
                 <div className="grid gap-2">
                   <Button

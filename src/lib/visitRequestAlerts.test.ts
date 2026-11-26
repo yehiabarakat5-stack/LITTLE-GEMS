@@ -64,6 +64,7 @@ describe("notice line and toast", () => {
       }),
     ).toEqual({
       id: "r1",
+      kind: "visit",
       contactName: "Sara Khan",
       pet: "Luna",
       service: "Daycare",

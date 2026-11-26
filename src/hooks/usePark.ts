@@ -15,6 +15,9 @@ type ParkDayStatus = Database["public"]["Enums"]["park_day_status"];
 export type ParkBookingWithJoins = ParkBooking & {
   owners: { first_name: string; last_name: string; phone: string; other_notes: string | null } | null;
   pets: { name: string; other_notes: string | null } | null;
+  /** Present after park_assessment_reviewed migration — client online assessments. */
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
 };
 
 const PARK_JOIN_SELECT =

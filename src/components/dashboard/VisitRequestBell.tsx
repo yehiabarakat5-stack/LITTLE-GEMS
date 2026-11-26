@@ -1,20 +1,44 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { format, formatDistanceToNow } from "date-fns";
 import { Bell } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  clientAssessmentContactName,
+  clientAssessmentPetName,
+  useUnhandledClientAssessments,
+} from "@/hooks/useClientAssessmentAlerts";
 import { useVisitRequests } from "@/hooks/useVisitRequests";
 import {
   VISIT_REQUEST_ALERT_BRANCH_ID,
+  alertOpenPath,
+  assessmentBookingNotice,
   todoVisitRequests,
   visitRequestNotice,
+  type VisitRequestNotice,
 } from "@/lib/visitRequestAlerts";
 
 export default function VisitRequestBell() {
   const { session, loading } = useAuth();
   const canSee = !loading && !!session;
-  const { data = [] } = useVisitRequests(canSee ? VISIT_REQUEST_ALERT_BRANCH_ID : null);
-  const open = todoVisitRequests(data).map(visitRequestNotice);
+  const branchId = canSee ? VISIT_REQUEST_ALERT_BRANCH_ID : null;
+  const { data: visits = [] } = useVisitRequests(branchId);
+  const { data: assessments = [] } = useUnhandledClientAssessments(branchId);
+  const open: VisitRequestNotice[] = useMemo(() => {
+    const visitNotices = todoVisitRequests(visits).map(visitRequestNotice);
+    const assessmentNotices = assessments.map((row) =>
+      assessmentBookingNotice({
+        id: row.id,
+        contact_name: clientAssessmentContactName(row),
+        pet_name: clientAssessmentPetName(row),
+        created_at: row.created_at,
+        visit_date: row.visit_date,
+      }),
+    );
+    return [...visitNotices, ...assessmentNotices].sort((a, b) =>
+      a.requestedAt < b.requestedAt ? 1 : -1,
+    );
+  }, [assessments, visits]);
   const count = open.length;
   const [openMenu, setOpenMenu] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -36,7 +60,7 @@ export default function VisitRequestBell() {
       <button
         type="button"
         className="relative rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        aria-label={count ? `${count} new visit requests` : "Visit request notifications"}
+        aria-label={count ? `${count} new requests` : "Request notifications"}
         aria-expanded={openMenu}
         onClick={() => setOpenMenu((v) => !v)}
       >
@@ -55,7 +79,7 @@ export default function VisitRequestBell() {
           role="menu"
           className="absolute right-0 z-50 mt-1 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border bg-card shadow-lg"
         >
-          <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">Visit requests to handle</div>
+          <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">Requests to handle</div>
           {count === 0 ? (
             <p className="px-3 py-4 text-sm text-muted-foreground">No new requests.</p>
           ) : (
@@ -63,14 +87,14 @@ export default function VisitRequestBell() {
               {open.map((n) => {
                 const when = requestedLabel(n.requestedAt);
                 return (
-                  <li key={n.id}>
+                  <li key={`${n.kind}-${n.id}`}>
                     <button
                       type="button"
                       role="menuitem"
                       className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted"
                       onClick={() => {
                         setOpenMenu(false);
-                        navigate(`/visit-requests?request=${n.id}`);
+                        navigate(alertOpenPath(n));
                       }}
                     >
                       <span className="text-sm font-medium text-foreground">{n.contactName}</span>

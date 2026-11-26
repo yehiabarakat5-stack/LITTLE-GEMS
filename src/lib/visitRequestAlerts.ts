@@ -71,10 +71,12 @@ export function visitRequestNewToast(name: string) {
 
 export type VisitRequestNotice = {
   id: string;
+  kind: "visit" | "assessment";
   contactName: string;
   pet: string;
   service: string;
   requestedAt: string;
+  visitDate?: string | null;
 };
 
 export function visitRequestNotice(row: {
@@ -86,10 +88,29 @@ export function visitRequestNotice(row: {
 }): VisitRequestNotice {
   return {
     id: row.id,
+    kind: "visit",
     contactName: row.contact_name.trim() || "Client",
     pet: row.pet_name?.trim() || "Pet not given",
     service: row.interest ? VISIT_INTEREST_LABEL[row.interest] : "Visit",
     requestedAt: row.created_at,
+  };
+}
+
+export function assessmentBookingNotice(row: {
+  id: string;
+  contact_name: string;
+  pet_name?: string | null;
+  created_at: string;
+  visit_date?: string | null;
+}): VisitRequestNotice {
+  return {
+    id: row.id,
+    kind: "assessment",
+    contactName: row.contact_name.trim() || "Client",
+    pet: row.pet_name?.trim() || "Pet not given",
+    service: "New assessment booking",
+    requestedAt: row.created_at,
+    visitDate: row.visit_date ?? null,
   };
 }
 
@@ -98,11 +119,44 @@ export function visitRequestAlarmBanner(row: Parameters<typeof visitRequestNotic
   return `🔔 New request from ${n.contactName} — ${n.pet}, ${n.service}`;
 }
 
+export function assessmentBookingAlarmBanner(row: {
+  contact_name: string;
+  pet_name?: string | null;
+}) {
+  const who = row.contact_name.trim() || "Client";
+  const pet = row.pet_name?.trim() || "Pet";
+  return `🔔 New assessment booking from ${who} — ${pet}, New assessment booking`;
+}
+
+export function assessmentBookingNewToast(name: string) {
+  const who = name.trim() || "a client";
+  return `New assessment booking from ${who}`;
+}
+
+export function alertOpenPath(notice: Pick<VisitRequestNotice, "id" | "kind" | "visitDate">) {
+  if (notice.kind === "assessment") {
+    const date = notice.visitDate || "";
+    const q = new URLSearchParams({ type: "assessment", booking: notice.id });
+    if (date) q.set("date", date);
+    return `/park?${q.toString()}`;
+  }
+  return `/visit-requests?request=${notice.id}`;
+}
+
 export function newestNewVisitRequest<T extends { id: string; status: string; created_at: string }>(
   rows: T[],
   seenIds: Set<string>,
 ): T | null {
   const fresh = rows.filter((row) => isTodoVisitRequest(row.status) && !seenIds.has(row.id));
+  if (fresh.length === 0) return null;
+  return fresh.reduce((latest, row) => (row.created_at >= latest.created_at ? row : latest));
+}
+
+export function newestNewAlertItem<T extends { id: string; created_at: string }>(
+  rows: T[],
+  seenIds: Set<string>,
+): T | null {
+  const fresh = rows.filter((row) => !seenIds.has(row.id));
   if (fresh.length === 0) return null;
   return fresh.reduce((latest, row) => (row.created_at >= latest.created_at ? row : latest));
 }
@@ -186,24 +240,64 @@ export function hasVisitRequestAudioOptIn() {
 
 export type VisitRequestAlarmPayload = {
   id: string;
+  kind: "visit" | "assessment";
   contact_name: string;
   pet_name: string | null;
   interest: VisitRequestInterest | null;
   created_at: string;
+  visit_date?: string | null;
 };
 
 export type VisitRequestAlarmMessage =
   | { type: "start"; request: VisitRequestAlarmPayload }
   | { type: "stop" };
 
-export function visitRequestAlarmPayload(row: VisitRequestAlarmPayload): VisitRequestAlarmPayload {
+export function visitRequestAlarmPayload(row: {
+  id: string;
+  contact_name: string;
+  pet_name: string | null;
+  interest?: VisitRequestInterest | null;
+  created_at: string;
+}): VisitRequestAlarmPayload {
   return {
+    id: row.id,
+    kind: "visit",
+    contact_name: row.contact_name,
+    pet_name: row.pet_name,
+    interest: row.interest ?? null,
+    created_at: row.created_at,
+  };
+}
+
+export function assessmentAlarmPayload(row: {
+  id: string;
+  contact_name: string;
+  pet_name: string | null;
+  created_at: string;
+  visit_date?: string | null;
+}): VisitRequestAlarmPayload {
+  return {
+    id: row.id,
+    kind: "assessment",
+    contact_name: row.contact_name,
+    pet_name: row.pet_name,
+    interest: null,
+    created_at: row.created_at,
+    visit_date: row.visit_date ?? null,
+  };
+}
+
+export function alarmBannerForPayload(row: VisitRequestAlarmPayload) {
+  if (row.kind === "assessment") {
+    return assessmentBookingAlarmBanner(row);
+  }
+  return visitRequestAlarmBanner({
     id: row.id,
     contact_name: row.contact_name,
     pet_name: row.pet_name,
     interest: row.interest,
     created_at: row.created_at,
-  };
+  });
 }
 
 type AudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
